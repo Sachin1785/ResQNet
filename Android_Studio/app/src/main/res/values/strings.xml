@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">SOSmesh</string>
+    
+    <!-- UI Labels -->
+    <string name="title_sos_mesh">Offline SOS Mesh</string>
+    <string name="hint_enter_name">Enter your name</string>
+    <string name="label_incident_type">Incident Type</string>
+    <string name="label_your_location">Your Location</string>
+    <string name="label_coordinates">Coordinates</string>
+    <string name="label_latitude">Latitude:</string>
+    <string name="label_longitude">Longitude:</string>
+    <string name="btn_broadcast_sos">BROADCAST SOS</string>
+    <string name="status_initializing">Status: Initializing…</string>
+    <string name="status_mesh_active">Status: Mesh Active</string>
+    <string name="status_sos_active">Status: SOS Active!</string>
+    <string name="label_mesh_logs">Mesh Activity Logs:</string>
+    <string name="acquiring_location">Acquiring location…</string>
+    
+    <!-- Incident Types -->
+    <string-array name="incident_types">
+        <item>Medical Emergency</item>
+        <item>Fire</item>
+        <item>Accident</item>
+        <item>Natural Disaster</item>
+        <item>Security Threat</item>
+        <item>Lost/Stranded</item>
+        <item>Other Emergency</item>
+    </string-array>
+</resources>

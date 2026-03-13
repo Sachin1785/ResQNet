@@ -1,0 +1,330 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Apple-inspired premium light palette */
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: rgba(255, 255, 255, 0.72);
+  --card-foreground: #1d1d1f;
+  --popover: rgba(255, 255, 255, 0.85);
+  --popover-foreground: #1d1d1f;
+
+  /* iOS Blue - Apple's signature color */
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+
+  /* iOS complementary colors */
+  --secondary: #5856d6;
+  --secondary-foreground: #ffffff;
+  --muted: #f2f2f7;
+  --muted-foreground: #8e8e93;
+
+  /* iOS System colors */
+  --accent: #ff3b30;
+  --accent-foreground: #ffffff;
+  --success: #34c759;
+  --success-foreground: #ffffff;
+  --warning: #ff9500;
+  --warning-foreground: #ffffff;
+  --destructive: #ff3b30;
+  --destructive-foreground: #ffffff;
+
+  /* Borders and inputs */
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(120, 120, 128, 0.12);
+  --ring: #007aff;
+
+  /* Charts */
+  --chart-1: #007aff;
+  --chart-2: #34c759;
+  --chart-3: #ff9500;
+  --chart-4: #ff3b30;
+  --chart-5: #5856d6;
+
+  /* Radius - Apple's larger, friendlier corners */
+  --radius: 1.25rem;
+
+  /* Sidebar */
+  --sidebar: rgba(242, 242, 247, 0.8);
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #007aff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ff3b30;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-ring: #007aff;
+}
+
+.dark {
+  /* Apple-inspired true black dark mode */
+  --background: #000000;
+  --foreground: #f5f5f7;
+  --card: rgba(28, 28, 30, 0.72);
+  --card-foreground: #f5f5f7;
+  --popover: rgba(28, 28, 30, 0.85);
+  --popover-foreground: #f5f5f7;
+
+  /* iOS Blue - brighter in dark mode */
+  --primary: #0a84ff;
+  --primary-foreground: #000000;
+
+  /* iOS complementary colors - adjusted for dark */
+  --secondary: #5e5ce6;
+  --secondary-foreground: #ffffff;
+  --muted: #1c1c1e;
+  --muted-foreground: #98989d;
+
+  /* iOS System colors - vibrant for dark mode */
+  --accent: #ff453a;
+  --accent-foreground: #ffffff;
+  --success: #32d74b;
+  --success-foreground: #000000;
+  --warning: #ff9f0a;
+  --warning-foreground: #000000;
+  --destructive: #ff453a;
+  --destructive-foreground: #ffffff;
+
+  /* Borders and inputs */
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(118, 118, 128, 0.24);
+  --ring: #0a84ff;
+
+  /* Charts */
+  --chart-1: #0a84ff;
+  --chart-2: #32d74b;
+  --chart-3: #ff9f0a;
+  --chart-4: #ff453a;
+  --chart-5: #5e5ce6;
+
+  /* Sidebar */
+  --sidebar: rgba(28, 28, 30, 0.8);
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #0a84ff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #ff453a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #0a84ff;
+}
+
+@theme inline {
+  --font-sans: "SF Pro Display", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", "Monaco", "Menlo", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 8px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Leaflet overrides for Apple aesthetic */
+.leaflet-container {
+  @apply rounded-3xl overflow-hidden;
+}
+
+.leaflet-control {
+  @apply rounded-2xl shadow-lg border-0;
+}
+
+.leaflet-bar a {
+  @apply bg-white dark:bg-black/40 text-foreground hover:bg-secondary transition-colors;
+  border: 1px solid var(--border);
+}
+
+.leaflet-popup-content-wrapper {
+  @apply rounded-2xl shadow-xl border-0;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.dark .leaflet-popup-content-wrapper {
+  background: rgba(28, 28, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leaflet-popup-tip {
+  @apply hidden;
+}
+
+/* Mobile safe area support */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Smooth scrolling for mobile */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Apple-inspired glassmorphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.dark .glass {
+  background: rgba(28, 28, 30, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(60px) saturate(200%);
+  -webkit-backdrop-filter: blur(60px) saturate(200%);
+}
+
+.dark .glass-strong {
+  background: rgba(28, 28, 30, 0.9);
+}
+
+/* Premium Apple-style shadows */
+.shadow-apple {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+}
+
+.shadow-apple-lg {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.08),
+    0 4px 8px rgba(0, 0, 0, 0.06),
+    0 8px 16px rgba(0, 0, 0, 0.06),
+    0 16px 32px rgba(0, 0, 0, 0.04);
+}
+
+.dark .shadow-apple,
+.dark .shadow-apple-lg {
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.5),
+    0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* iOS-style spring animations */
+@keyframes spring-in {
+  0% {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.02);
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-spring-in {
+  animation: spring-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* iOS button press effect */
+.ios-press {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.ios-press:active {
+  transform: scale(0.96);
+  opacity: 0.8;
+}
+
+/* Vibrant gradient backgrounds */
+.gradient-header {
+  background: linear-gradient(135deg,
+      rgba(0, 122, 255, 0.1) 0%,
+      rgba(88, 86, 214, 0.05) 100%);
+}
+
+.dark .gradient-header {
+  background: linear-gradient(135deg,
+      rgba(10, 132, 255, 0.15) 0%,
+      rgba(94, 92, 230, 0.08) 100%);
+}
+
+/* Enhanced card elevation */
+.card-elevated {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    0 4px 16px rgba(0, 0, 0, 0.03);
+}
+
+.dark .card-elevated {
+  background: rgba(28, 28, 30, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Smooth transitions */
+.transition-apple {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}

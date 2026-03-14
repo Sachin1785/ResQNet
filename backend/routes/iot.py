@@ -60,48 +60,59 @@ def handle_iot_stream():
     resultant_accl = math.sqrt(ax**2 + ay**2 + az**2)
 
     # ── Handle Gas Reading (ppm or gas_voltage) ──────────────
-    # New gateway uses 'ppm', legacy uses 'gas_voltage'
     gas_val = data.get('ppm') if 'ppm' in data else data.get('gas_voltage')
     if gas_val is None: gas_val = 0
 
-    # ── IoT DB: Log raw reading ───────────────────────────────
-    iot_cur.execute('''
-        INSERT INTO iot_logs (
-            system_id, gas, temp, water, accl,
-            pressure, altitude, rain_level, accel_x, accel_y, accel_z
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        system_id,
-        gas_val,
-        data.get('temperature'),
-        data.get('water_level'),
-        round(resultant_accl, 3),
-        data.get('pressure'),
-        data.get('altitude'),
-        data.get('rain_level'),
-        ax, ay, az
-    ))
-    iot_conn.commit()
-    iot_conn.close()   # ← Release IoT DB lock immediately
-
     # ── Threshold check ──────────────────────────────────────
     alerts_triggered = []
-
-    # Gas Check (Detects leak if above threshold)
     if gas_val > config['threshold_gas']:
         alerts_triggered.append(('fire', 'Gas Leak / Fire Hazard', 'critical'))
-
     if data.get('temperature', 0) > config['threshold_temp']:
         alerts_triggered.append(('fire', 'Critical High Temperature', 'high'))
-
     if data.get('water_level', 0) > config['threshold_water']:
         alerts_triggered.append(('natural_disaster', 'Flood Detection', 'high'))
-
     if resultant_accl > config['threshold_accl']:
         alerts_triggered.append(('natural_disaster', 'Seismic Activity / Earthquake', 'critical'))
-
     if data.get('rain_level', 0) > config['threshold_rain']:
         alerts_triggered.append(('natural_disaster', 'Heavy Rain Alert', 'medium'))
+
+    # ── Log Throttling ────────────────────────────────────────
+    # We broadcast LIVE data via WebSocket every time, but we 
+    # only SAVE to the database once every 2 minutes (Normal)
+    # or every 10 seconds (Alert triggered) to prevent bloat.
+    has_alert = len(alerts_triggered) > 0
+    throttle_seconds = 10 if has_alert else 120 
+    
+    # Calculate time since last log (stored in config['updated_at'])
+    # Using fromisoformat is more robust than strptime for varying SQLite formats
+    try:
+        if config.get('updated_at'):
+            ts_str = config['updated_at'].replace(' ', 'T')
+            last_updated = datetime.fromisoformat(ts_str)
+        else:
+            last_updated = datetime.min
+    except Exception:
+        last_updated = datetime.min
+        
+    time_since_last = (datetime.utcnow() - last_updated).total_seconds()
+
+    if time_since_last >= throttle_seconds:
+        # ── IoT DB: Log raw reading ───────────────────────────
+        iot_cur.execute('''
+            INSERT INTO iot_logs (
+                system_id, gas, temp, water, accl,
+                pressure, altitude, rain_level, accel_x, accel_y, accel_z
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            system_id, gas_val, data.get('temperature'), data.get('water_level'),
+            round(resultant_accl, 3), data.get('pressure'), data.get('altitude'),
+            data.get('rain_level'), ax, ay, az
+        ))
+        # Update throttle timestamp
+        iot_cur.execute('UPDATE iot_configs SET updated_at = CURRENT_TIMESTAMP WHERE system_id = ?', (system_id,))
+        iot_conn.commit()
+    
+    iot_conn.close()   # ← Release IoT DB lock immediately
 
     # ── Main DB: Create/merge incidents (only if alert) ──────
     # This DB write is rare (only on threshold breach) so lock
@@ -121,19 +132,27 @@ def handle_iot_stream():
             if existing:
                 new_count = (existing['report_count'] or 1) + 1
                 
-                # Check for 5-minute cooldown on timeline entries to prevent log flooding
-                # SQLite CURRENT_TIMESTAMP is in UTC. We check if updated_at was > 5 mins ago.
+                # Check for cooldown on updates to PREVENT DB FLOODING
+                # Report counts update in main DB only every 1 minute
+                crisis_cur.execute('''
+                    SELECT id FROM incidents 
+                    WHERE id = ? AND updated_at < datetime('now', '-1 minutes')
+                ''', (existing['id'],))
+                can_update_main = crisis_cur.fetchone() is not None or existing['report_count'] == 1
+
+                if can_update_main:
+                    crisis_cur.execute('''
+                        UPDATE incidents SET report_count = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', (new_count, existing['id']))
+                
+                # Independent 5-minute cooldown for Timeline Events (Text logs)
                 crisis_cur.execute('''
                     SELECT id FROM incidents 
                     WHERE id = ? AND updated_at < datetime('now', '-5 minutes')
                 ''', (existing['id'],))
                 should_add_timeline = crisis_cur.fetchone() is not None or existing['report_count'] == 1
 
-                crisis_cur.execute('''
-                    UPDATE incidents SET report_count = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                ''', (new_count, existing['id']))
-                
                 if should_add_timeline:
                     crisis_cur.execute('''
                         INSERT INTO incident_timeline (incident_id, event_type, description, user_name)

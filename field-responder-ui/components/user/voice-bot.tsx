@@ -170,9 +170,9 @@ export default function VoiceBot() {
                         </div>
 
                         <div className="space-y-2">
-                            <h2 className="text-2xl font-bold tracking-tight">Arya Dispatcher</h2>
+                            <h2 className="text-2xl font-bold tracking-tight">Arya Assistant</h2>
                             <p className="text-muted-foreground text-sm">
-                                {isListening ? "Listening for your emergency..." : isProcessing ? "Arya is identifying safety protocols..." : "Tap the button below to speak"}
+                                {isListening ? "Listening..." : isProcessing ? "Arya is thinking..." : "Tap the button below to speak"}
                             </p>
                         </div>
 
@@ -185,7 +185,7 @@ export default function VoiceBot() {
                             ) : history.length > 0 ? (
                                 <p className="text-primary font-bold">{history[history.length - 1].content}</p>
                             ) : (
-                                <p className="text-muted-foreground italic">"I'm at the North Gate, there's a flood!"</p>
+                                <p className="text-muted-foreground italic">"How can I stay safe during a flood?"</p>
                             )}
                         </div>
 

@@ -15,7 +15,7 @@ export default function BottomNav({ activeTab, onTabChange, mode }: BottomNavPro
         { id: "home", icon: Home, label: "Home" },
         { id: "report", icon: FileText, label: "Report" },
         { id: "resources", icon: MapPin, label: "Resources" },
-        { id: "alerts", icon: Bell, label: "Alerts" },
+        // { id: "alerts", icon: Bell, label: "Alerts" }, // TEMP HIDDEN
         { id: "profile", icon: User, label: "Profile" },
     ]
 

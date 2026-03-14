@@ -104,10 +104,10 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
             <div className="gradient-header border-b border-border px-4 py-6">
                 <div className="flex items-center justify-between mb-2">
                     <h1 className="text-2xl font-bold">Safety Center</h1>
-                    <div className={`w-3 h-3 rounded-full animate-pulse ${activeIncident || nearbyIncidents.length > 0 ? "bg-red-500" : "bg-success"}`} />
+                    <div className={`w-3 h-3 rounded-full animate-pulse ${activeIncident ? "bg-red-500" : "bg-success"}`} />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                    {activeIncident ? "Help is on the way" : nearbyIncidents.length > 0 ? "Incidents reported nearby" : "You're in a safe area"}
+                    {activeIncident ? "Help is on the way" : "You're in a safe area"}
                 </p>
             </div>
 
@@ -177,7 +177,7 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
                 </div>
             </div>
 
-            {/* Nearby Incidents */}
+            {/* Nearby Incidents - TEMP HIDDEN
             <div className="px-4 mt-6 pb-4">
                 <div className="flex items-center justify-between mb-3">
                     <h2 className="text-lg font-bold">Nearby Incidents</h2>
@@ -192,16 +192,11 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
                         <p className="text-xs text-muted-foreground italic text-center py-4">No active incidents nearby</p>
                     ) : (
                         nearbyIncidents.map((incident) => (
-                            <div
-                                key={incident.id}
-                                className="card-elevated rounded-xl p-3 shadow-apple border border-border/50 hover:border-primary/30 transition-all"
-                            >
+                            <div key={incident.id} className="card-elevated rounded-xl p-3 shadow-apple border border-border/50 hover:border-primary/30 transition-all">
                                 <div className="flex items-center justify-between">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <div className={`w-2 h-2 rounded-full ${incident.severity === "high" || incident.severity === "critical" ? "bg-red-500" :
-                                                incident.severity === "medium" || incident.severity === "warning" ? "bg-orange-500" : "bg-yellow-500"
-                                                }`} />
+                                            <div className={`w-2 h-2 rounded-full ${incident.severity === "high" || incident.severity === "critical" ? "bg-red-500" : incident.severity === "medium" || incident.severity === "warning" ? "bg-orange-500" : "bg-yellow-500"}`} />
                                             <h3 className="font-semibold text-sm text-foreground">{incident.type}</h3>
                                         </div>
                                         <p className="text-xs text-muted-foreground">{incident.location}</p>
@@ -216,6 +211,7 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
                     )}
                 </div>
             </div>
+            */}
 
             {/* Safety Tips - NOW CLICKABLE */}
             <div className="px-4 pb-6">

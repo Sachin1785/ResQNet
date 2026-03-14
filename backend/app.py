@@ -28,6 +28,7 @@ from routes.resources import resources_bp
 from routes.sos_mesh import sos_mesh_bp
 from routes.sms import sms_bp
 from routes.iot import iot_bp
+from routes.voice_bot import voice_bot_bp
 
 app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(incidents_bp, url_prefix='/api')
@@ -40,6 +41,7 @@ app.register_blueprint(resources_bp, url_prefix='/api')
 app.register_blueprint(sos_mesh_bp, url_prefix='/api')
 app.register_blueprint(sms_bp, url_prefix='/api')
 app.register_blueprint(iot_bp, url_prefix='/api')
+app.register_blueprint(voice_bot_bp, url_prefix='/api')
 
 
 # Root endpoint

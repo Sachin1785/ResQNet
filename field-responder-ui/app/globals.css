@@ -328,3 +328,29 @@
 .transition-apple {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+/* ── Arya Voice Bot Blob Animations ── */
+@keyframes arya-breathe {
+  0%, 100% { height: 110px; transform: translateY(0); }
+  50%       { height: 118px; transform: translateY(-6px); }
+}
+@keyframes arya-bounce {
+  0%,100% { transform: translateY(0); height: 110px; }
+  20%     { transform: translateY(-18px); height: 106px; }
+  40%     { transform: translateY(0); height: 114px; }
+  60%     { transform: translateY(-8px); height: 108px; }
+  80%     { transform: translateY(0); }
+}
+@keyframes arya-shake {
+  0%,100% { transform: rotate(0deg) translateY(-4px); }
+  25%     { transform: rotate(6deg) translateY(-4px); }
+  50%     { transform: rotate(-6deg) translateY(-4px); }
+  75%     { transform: rotate(4deg) translateY(-4px); }
+}
+@keyframes arya-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95%           { transform: scaleY(0.05); }
+}
+.arya-breathe { animation: arya-breathe 3s ease-in-out infinite; }
+.arya-bounce  { animation: arya-bounce  1.2s ease-in-out infinite; }
+.arya-shake   { animation: arya-shake   0.6s linear infinite; }
+.arya-blink   { animation: arya-blink   5s linear infinite; }

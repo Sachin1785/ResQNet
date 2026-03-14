@@ -158,9 +158,19 @@ export function IoTManagement() {
                     {/* Live Data Visualizer Grid */}
                     <div className="grid grid-cols-2 gap-2.5">
                       {SENSOR_METRICS.map(metric => {
-                        const val = activeLogs[config.system_id]?.values?.[metric.key]
+                        const logData = activeLogs[config.system_id]
+                        const val = logData?.values?.[metric.key]
                         const threshold = config[`threshold_${metric.key}`]
                         const isBreach = typeof val === 'number' && val > threshold
+                        
+                        // Dynamic label and unit for gas (PPM vs Voltage)
+                        let displayLabel = metric.label
+                        let displayUnit = metric.unit
+                        
+                        if (metric.key === 'gas' && logData?.values?.gas_unit) {
+                          displayUnit = logData.values.gas_unit
+                          displayLabel = displayUnit === 'ppm' ? 'Gas (PPM)' : 'Gas (V)'
+                        }
 
                         return (
                           <div key={metric.key} className={`p-2.5 rounded-xl border transition-all ${isBreach 
@@ -169,7 +179,7 @@ export function IoTManagement() {
                             <div className="flex items-center justify-between mb-1.5 px-0.5">
                               <div className="flex items-center gap-1.5">
                                 <metric.icon className={`w-3.5 h-3.5 ${isBreach ? 'text-primary' : 'text-muted-foreground'}`} />
-                                <span className="text-[10px] uppercase text-muted-foreground font-bold tracking-tighter">{metric.label}</span>
+                                <span className="text-[10px] uppercase text-muted-foreground font-bold tracking-tighter">{displayLabel}</span>
                               </div>
                               {isBreach && <AlertCircle className="w-3.5 h-3.5 text-primary animate-bounce" />}
                             </div>
@@ -177,7 +187,7 @@ export function IoTManagement() {
                               <span className={`text-xl font-black ${isBreach ? 'text-primary' : 'text-foreground font-mono'}`}>
                                 {typeof val === 'number' ? (metric.key === 'accl' ? val.toFixed(2) : val.toFixed(1)) : '---'}
                               </span>
-                              <span className="text-[9px] text-muted-foreground font-bold">{metric.unit}</span>
+                              <span className="text-[9px] text-muted-foreground font-bold">{displayUnit}</span>
                             </div>
                             <div className="w-full h-1 bg-white/5 rounded-full mt-2 overflow-hidden">
                                 <div 

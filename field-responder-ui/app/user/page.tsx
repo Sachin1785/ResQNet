@@ -11,6 +11,7 @@ import NearbyAlerts from "@/components/user/nearby-alerts"
 import ResourcesView from "@/components/user/resources-view"
 import UserProfile from "@/components/user/user-profile"
 import SafetyGuide from "@/components/user/safety-guide"
+import VoiceBot from "@/components/user/voice-bot"
 
 export default function UserPage() {
     const router = useRouter()
@@ -94,6 +95,9 @@ export default function UserPage() {
                 <div className="flex-1 overflow-hidden">
                     {renderView()}
                 </div>
+
+                {/* Voice Bot Arya */}
+                <VoiceBot />
 
                 {/* Bottom Navigation */}
                 <BottomNav activeTab={activeTab} onTabChange={setActiveTab} mode="user" />

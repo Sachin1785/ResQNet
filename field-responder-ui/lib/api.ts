@@ -194,6 +194,16 @@ export const resourcesAPI = {
     }
 };
 
+// Voice Bot API
+export const voiceBotAPI = {
+    chat: async (text: string, history: any[] = []) => {
+        return fetchAPI('/voice-bot/chat', {
+            method: 'POST',
+            body: JSON.stringify({ text, history }),
+        });
+    }
+};
+
 export default {
     incidents: incidentsAPI,
     alerts: alertsAPI,
@@ -201,4 +211,5 @@ export default {
     comms: commsAPI,
     notifications: notificationsAPI,
     resources: resourcesAPI,
+    voiceBot: voiceBotAPI,
 };

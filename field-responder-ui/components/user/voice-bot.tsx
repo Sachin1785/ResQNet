@@ -11,7 +11,7 @@ export default function VoiceBot() {
     const [text, setText] = useState("")
     const [history, setHistory] = useState<any[]>([])
     const [error, setError] = useState<string | null>(null)
-    
+
     // Web Speech API
     const recognitionRef = useRef<any>(null)
     const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -47,12 +47,12 @@ export default function VoiceBot() {
     const toggleBot = () => {
         const newOpen = !isOpen
         setIsOpen(newOpen)
-        
+
         if (newOpen) {
             // Reset state when opening
             setText("")
             setError(null)
-            
+
             // If it's a new session, let Arya start first
             if (history.length === 0) {
                 sendMessage("START_DISPATCH_SESSION")
@@ -72,7 +72,7 @@ export default function VoiceBot() {
             setError("Speech recognition is not supported in this browser.")
             return
         }
-        
+
         setError(null)
         setText("")
         setIsListening(true)
@@ -88,11 +88,11 @@ export default function VoiceBot() {
     const sendMessage = async (input: string) => {
         setIsProcessing(true)
         setError(null)
-        
+
         try {
             const res = await voiceBotAPI.chat(input, history)
             setHistory(res.history)
-            
+
             // Play audio if returned
             if (res.audio) {
                 playAudio(res.audio)
@@ -107,7 +107,7 @@ export default function VoiceBot() {
     const playAudio = (base64Audio: string) => {
         const audioBlob = base64ToBlob(base64Audio, "audio/mpeg")
         const url = URL.createObjectURL(audioBlob)
-        
+
         if (audioRef.current) {
             audioRef.current.src = url
             audioRef.current.play()
@@ -131,7 +131,7 @@ export default function VoiceBot() {
     return (
         <>
             {/* Floating Action Button */}
-            <button 
+            <button
                 onClick={toggleBot}
                 className={`fixed bottom-24 right-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 z-50 ${isOpen ? 'bg-red-500 rotate-90' : 'bg-primary hover:scale-110 shadow-primary/40'}`}
             >
@@ -147,7 +147,7 @@ export default function VoiceBot() {
             {isOpen && (
                 <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-background/95 backdrop-blur-md animate-in fade-in zoom-in duration-300">
                     <div className="w-full max-w-md p-6 flex flex-col items-center text-center space-y-8">
-                        
+
                         {/* Status / Logo */}
                         <div className="relative">
                             <div className={`w-32 h-32 rounded-full border-4 flex items-center justify-center transition-all duration-500 ${isListening ? 'border-primary animate-pulse shadow-[0_0_30px_rgba(var(--primary),0.5)]' : isProcessing ? 'border-primary/50' : 'border-muted'}`}>
@@ -159,7 +159,7 @@ export default function VoiceBot() {
                                     <Volume2 className="w-12 h-12 text-muted-foreground" />
                                 )}
                             </div>
-                            
+
                             {/* Listening Waves */}
                             {isListening && (
                                 <>
@@ -170,9 +170,9 @@ export default function VoiceBot() {
                         </div>
 
                         <div className="space-y-2">
-                            <h2 className="text-2xl font-bold tracking-tight">Arya Assistant</h2>
+                            <h2 className="text-2xl font-bold tracking-tight">Arya Dispatcher</h2>
                             <p className="text-muted-foreground text-sm">
-                                {isListening ? "Listening..." : isProcessing ? "Arya is thinking..." : "Tap the button below to speak"}
+                                {isListening ? "Listening for your emergency..." : isProcessing ? "Arya is identifying safety protocols..." : "Tap the button below to speak"}
                             </p>
                         </div>
 
@@ -185,21 +185,21 @@ export default function VoiceBot() {
                             ) : history.length > 0 ? (
                                 <p className="text-primary font-bold">{history[history.length - 1].content}</p>
                             ) : (
-                                <p className="text-muted-foreground italic">"How can I stay safe during a flood?"</p>
+                                <p className="text-muted-foreground italic">"I'm at the North Gate, there's a flood!"</p>
                             )}
                         </div>
 
                         {/* Controls */}
                         <div className="flex flex-col items-center gap-4">
                             {!isProcessing && (
-                                <button 
+                                <button
                                     onClick={isListening ? stopListening : startListening}
                                     className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isListening ? 'bg-red-500 animate-pulse' : 'bg-primary hover:scale-105'}`}
                                 >
                                     {isListening ? <MicOff className="text-white w-8 h-8" /> : <Mic className="text-white w-8 h-8" />}
                                 </button>
                             )}
-                            
+
                             <p className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
                                 Powered by ResQNet Emergency AI
                             </p>

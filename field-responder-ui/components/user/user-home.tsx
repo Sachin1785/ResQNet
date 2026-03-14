@@ -106,9 +106,9 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
                     <h1 className="text-2xl font-bold">Safety Center</h1>
                     <div className={`w-3 h-3 rounded-full animate-pulse ${activeIncident ? "bg-red-500" : "bg-success"}`} />
                 </div>
-                <p className="text-sm text-muted-foreground">
-                    {activeIncident ? "Help is on the way" : "You're in a safe area"}
-                </p>
+                {activeIncident && (
+                    <p className="text-sm text-muted-foreground">Help is on the way</p>
+                )}
             </div>
 
             {/* Active Incident Tracker */}

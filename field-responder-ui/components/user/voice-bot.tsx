@@ -16,6 +16,15 @@ export default function VoiceBot() {
     const recognitionRef = useRef<any>(null)
     const audioRef = useRef<HTMLAudioElement | null>(null)
 
+    // historyRef mirrors history state so speech recognition callbacks always read the LATEST value.
+    // Without this, the onresult callback captures the initial history=[] and never updates (stale closure bug).
+    const historyRef = useRef<any[]>([])
+
+    const updateHistory = (newHistory: any[]) => {
+        historyRef.current = newHistory
+        setHistory(newHistory)
+    }
+
     useEffect(() => {
         if (typeof window !== "undefined") {
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -28,7 +37,9 @@ export default function VoiceBot() {
                 recognitionRef.current.onresult = (event: any) => {
                     const transcript = event.results[0][0].transcript
                     setText(transcript)
-                    sendMessage(transcript)
+                    // Read from historyRef.current, NOT from the history state variable.
+                    // history state is stale inside this callback because of the [] dep array closure.
+                    sendMessageWithHistory(transcript, historyRef.current)
                 }
 
                 recognitionRef.current.onend = () => {
@@ -49,17 +60,14 @@ export default function VoiceBot() {
         setIsOpen(newOpen)
 
         if (newOpen) {
-            // Reset state when opening
             setText("")
             setError(null)
-
-            // If it's a new session, let Arya start first
-            if (history.length === 0) {
-                sendMessage("START_DISPATCH_SESSION")
+            if (historyRef.current.length === 0) {
+                sendMessageWithHistory("START_DISPATCH_SESSION", [])
             }
         } else {
-            // Reset history and clear audio when closing
-            setHistory([])
+            historyRef.current = []
+            updateHistory([])
             if (audioRef.current) {
                 audioRef.current.pause()
                 audioRef.current.src = ""
@@ -85,15 +93,15 @@ export default function VoiceBot() {
         }
     }
 
-    const sendMessage = async (input: string) => {
+    // Core send function — always takes history explicitly to avoid stale closure issues
+    const sendMessageWithHistory = async (input: string, currentHistory: any[]) => {
         setIsProcessing(true)
         setError(null)
 
         try {
-            const res = await voiceBotAPI.chat(input, history)
-            setHistory(res.history)
+            const res = await voiceBotAPI.chat(input, currentHistory)
+            updateHistory(res.history)
 
-            // Play audio if returned
             if (res.audio) {
                 playAudio(res.audio)
             }

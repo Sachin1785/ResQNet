@@ -95,8 +95,8 @@ export default function UserPage() {
                     {renderView()}
                 </div>
 
-                {/* Voice Bot Arya */}
-                <VoiceBot />
+                {/* Voice Bot Arya - TEMP HIDDEN */}
+                {/* <VoiceBot /> */}
 
                 {/* Bottom Navigation */}
                 <BottomNav activeTab={activeTab} onTabChange={setActiveTab} mode="user" />

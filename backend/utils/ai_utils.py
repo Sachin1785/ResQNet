@@ -4,18 +4,24 @@ from PIL import Image
 from typing import Dict, Any, Optional
 import json
 import re
+from dotenv import load_dotenv
+
+# Ensure environment is loaded
+load_dotenv()
 
 class AIHandler:
     def __init__(self):
         # Configure the Gemini API using the new google-genai SDK
-        api_key = os.getenv("GOOGLE_API_KEY")
+        # Prefer GEMINI_API_KEY, fallback to GOOGLE_API_KEY
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        
         if api_key:
             self.client = genai.Client(api_key=api_key)
             self.model_id = 'gemini-flash-latest'
             self.configured = True
         else:
             self.configured = False
-            print("⚠️ GOOGLE_API_KEY not found in environment. AI verification disabled.")
+            print("⚠️ Neither GEMINI_API_KEY nor GOOGLE_API_KEY found. AI verification disabled.")
 
     def verify_incident_photo(self, photo_path: str, incident_type: str, incident_description: str) -> Dict[str, Any]:
         """

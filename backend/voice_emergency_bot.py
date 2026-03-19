@@ -2,7 +2,8 @@ import os
 import time
 import threading
 import queue
-from groq import Groq
+from google import genai
+from google.genai import types
 from elevenlabs.client import ElevenLabs
 from elevenlabs.play import play
 import speech_recognition as sr
@@ -12,34 +13,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "YOUR_ELEVENLABS_API_KEY")
 
 VOICE_ID = "EXAVITQu4vr4xnSDxMaL" # Bella (Calm, Professional) - You can change this
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GEMINI_MODEL = "gemini-flash-latest" # Using Flash for fast dispatch responses
 
 # System Prompt for Arya Dispatcher
 SYSTEM_PROMPT = """
 You are Arya, the ResQNet Emergency Dispatcher. 
-Your ONLY goal is to collect 3 specific pieces of information (slots) from the user:
-1. DISASTER_TYPE
-2. LOCATION
-3. PEOPLE_COUNT
+Your goal is to understand the user's emergency situation, gather necessary details, and provide a single relevant safety tip.
 
 STRICT RULES:
-- Read the entire chat history carefully to see what the user has already told you.
-- NEVER ask for information you already have.
-- Ask for EXACTLY ONE missing piece of information at a time.
-- KEEP RESPONSES UNDER 15 WORDS.
+- Ask relevant follow up questions to gather critical information (e.g., nature of emergency, location, number of people).
+- READ THE CHAT HISTORY. NEVER repeat a question for information the user has already provided. If they said there's a fire, do NOT ask what their emergency is again.
+- Ask only ONE follow up question at a time.
+- Keep your responses short and concise.
+- If the user says exactly "START_DISPATCH_SESSION", greet them and ask what the emergency is.
 
-STATE MACHINE LOGIC (Follow this strictly):
-- If the user hasn't said what the emergency is, ask: "This is Arya Dispatch. What is your emergency?"
-- If you know the emergency, but NOT the location, ask: "What is your current location?"
-- If you know the emergency AND location, but NOT the number of people, ask: "How many people are with you?"
-- If the user answers multiple things at once, move to the next unknown slot.
-
-ONCE ALL 3 SLOTS ARE KNOWN:
-Stop asking questions. Give ONE brief safety tip based on the disaster, then say EXACTLY: "Your report has been recorded. Help is being coordinated. Stay safe."
+LOGIC:
+- Assess what information is still missing to properly document the emergency.
+- Once you are satisfied you have gathered enough information, stop asking questions. Provide ONE brief safety tip based on the disaster, and conclude by saying EXACTLY: "Your report has been recorded. Help is being coordinated. Stay safe."
 
 Safety Tip Cheat Sheet:
 - Fire: Stay low. Touch doors with back of hand. Get out.
@@ -53,15 +47,13 @@ class VoiceBot:
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         
-        # Initialize Groq
-        if not GROQ_API_KEY:
-            print("⚠️ Warning: No GROQ_API_KEY found.")
-        self.client = Groq(api_key=GROQ_API_KEY)
+        # Initialize Gemini
+        if not GEMINI_API_KEY:
+            print("⚠️ Warning: No GEMINI_API_KEY found.")
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
         
         # Initialize Chat History
-        self.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+        self.messages = []
         
         # Initialize ElevenLabs Client
         if not ELEVENLABS_API_KEY:
@@ -89,26 +81,49 @@ class VoiceBot:
                 return None
 
     def get_ai_response(self, text):
-        """Sends text to Groq and gets a response."""
+        """Sends text to Gemini and gets a response."""
         try:
+            # Build contents history for Gemini using native roles, ensuring perfect alternation
+            contents = []
+            for msg in self.messages:
+                role = "user" if msg['role'] == "user" else "model"
+                
+                if contents and contents[-1].role == role:
+                    contents[-1].parts.append(types.Part.from_text(text="\n" + msg['content']))
+                else:
+                    contents.append(types.Content(
+                        role=role,
+                        parts=[types.Part.from_text(text=msg['content'])]
+                    ))
+                    
+            # Add current user message
+            if contents and contents[-1].role == "user":
+                contents[-1].parts.append(types.Part.from_text(text="\n" + text))
+            else:
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=text)]
+                ))
+            
+            response_text = ""
+            # Using the stream as requested in snippet
+            for chunk in self.client.models.generate_content_stream(
+                model=GEMINI_MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    temperature=0.5,
+                ),
+            ):
+                if chunk.text:
+                    response_text += chunk.text
+            
             self.messages.append({"role": "user", "content": text})
-            
-            completion = self.client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=self.messages,
-                temperature=0.5,
-                max_tokens=100,
-                top_p=1,
-                stream=False,
-                stop=None,
-            )
-            
-            response_text = completion.choices[0].message.content
-            self.messages.append({"role": "assistant", "content": response_text})
+            self.messages.append({"role": "model", "content": response_text})
             
             return response_text
         except Exception as e:
-            print(f"❌ Groq Error: {e}")
+            print(f"❌ Gemini Error: {e}")
             return "I am having trouble connecting. Please hold."
 
     def speak(self, text):
@@ -128,7 +143,7 @@ class VoiceBot:
             pass
 
     def run(self):
-        print("🚀 Arya Emergency Voice Bot (Groq Powered) is Active.")
+        print("🚀 Arya Emergency Voice Bot (Gemini Powered) is Active.")
         print("-----------------------------------------------------")
         
         # Initial greeting

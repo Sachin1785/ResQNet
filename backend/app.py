@@ -1,9 +1,14 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables early
+load_dotenv()
+
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from config import Config
 from database import init_db, seed_sample_data, get_db_connection
-import os
 
 # Initialize Flask app
 app = Flask(__name__)

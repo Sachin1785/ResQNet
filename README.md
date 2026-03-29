@@ -1,9 +1,8 @@
-# 🌐 Hackfusion: Next-Gen Crisis Management System
+# 🌐 ResQNet: Next-Gen Crisis Management System
 
-![Hackfusion Banner](./public/banner.png)
 
 ## 🎯 Overview
-**Hackfusion** is a high-performance, real-time crisis management ecosystem designed to bridge the gap between emergency command centers and field responders. By integrating live data, geospatial intelligence, and a resilient **Dual-Layer Communication Hub (SMS & Bluetooth Mesh)**, Hackfusion ensures that help is always coordinated, even when the internet or cellular data fails.
+**ResQNet** is a high-performance, real-time crisis management ecosystem designed to bridge the gap between emergency command centers and field responders. By integrating live data, geospatial intelligence, and a resilient **Dual-Layer Communication Hub (SMS & Bluetooth Mesh)**, Hackfusion ensures that help is always coordinated, even when the internet or cellular data fails.
 
 ---
 
@@ -78,25 +77,7 @@ The system features a cutting-edge AI verification layer using **Google Gemini F
 
 ---
 
-## 📂 Project Structure
 
-```text
-Hackfusion/
-├── backend/                       # Flask API & WebSocket Server
-│   ├── routes/                    # API Endpoints (SMS, Mesh, Incidents, Auth, AI)
-│   ├── utils/                     # Geocoding, AI Handling, Geo-logic, Notifications
-│   ├── database.py                # SQLite Schema & Multi-threaded WAL Initialization
-│   └── app.py                     # Main Entry Point with Socket.IO integration
-├── crisis-command-dashboard/      # Next.js Command Center (Admin Interface)
-│   ├── components/                # Map, Sidebar, Analytics, Comms panels
-│   └── lib/                       # API Wrappers & Custom Hooks
-├── field-responder-ui/            # Next.js PWA (Responder Interface)
-│   ├── components/                # Mission View, SOS Button, Reports
-│   └── public/                    # PWA Manifest & Service Workers
-└── scripts/                       # Maintenance & Deduplication Verification tools
-```
-
----
 
 ## ⚙️ Quick Start
 
@@ -136,4 +117,3 @@ npm run dev               # Responder PWA runs on http://localhost:3001
 
 ---
 
-*Built for Hackfusion 2026. Empowering responders, saving lives.*

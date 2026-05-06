@@ -2,7 +2,7 @@
 
 
 ## 🎯 Overview
-**ResQNet** is a high-performance, real-time crisis management ecosystem designed to bridge the gap between emergency command centers and field responders. By integrating live data, geospatial intelligence, and a resilient **Dual-Layer Communication Hub (SMS & Bluetooth Mesh)**, Hackfusion ensures that help is always coordinated, even when the internet or cellular data fails.
+**ResQNet** is a high-performance, real-time crisis management ecosystem designed to bridge the gap between emergency command centers and field responders. By integrating live data, geospatial intelligence, and a resilient **Dual-Layer Communication Hub (SMS & Bluetooth Mesh)**, ResQNet ensures that help is always coordinated, even when the internet or cellular data fails.
 
 ---
 
@@ -77,8 +77,6 @@ The system features a cutting-edge AI verification layer using **Google Gemini F
 
 ---
 
-
-
 ## ⚙️ Quick Start
 
 ### 1️⃣ Backend Setup
@@ -97,14 +95,14 @@ python app.py             # Server runs on http://localhost:5000
 ```bash
 cd crisis-command-dashboard
 npm install
-npm run dev               # Dashboard runs on http://localhost:3000
+npm run dev
 ```
 
 ### 3️⃣ Responder UI Setup
 ```bash
 cd field-responder-ui
 npm install
-npm run dev               # Responder PWA runs on http://localhost:3001
+npm run dev               
 ```
 
 ---
@@ -116,4 +114,3 @@ npm run dev               # Responder PWA runs on http://localhost:3001
 - **JWT Authentication**: Secured endpoints for all critical operations.
 
 ---
-

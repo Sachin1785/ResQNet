@@ -27,6 +27,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 	implementation("org.springframework.boot:spring-boot-starter-websocket")
+	implementation("com.fasterxml.jackson.core:jackson-databind")
 	implementation("org.xerial:sqlite-jdbc:3.46.0.0")
 	implementation("org.hibernate.orm:hibernate-community-dialects:6.5.2.Final")
 	compileOnly("org.projectlombok:lombok")

@@ -7,11 +7,16 @@ class Config:
     # Base directory
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     
-    # Database
-    DATABASE_PATH = os.path.join(BASE_DIR, 'crisis_management.db')
+    # Database Configuration (PostgreSQL/Aurora)
+    DATABASE_URI = os.environ.get('DATABASE_URI', 'postgresql://resqnet_admin:SecurePasswordChangeMe123!@localhost:5432/resqnet')
     
-    # IoT Sensor Database (separate to prevent lock contention)
-    IOT_DATABASE_PATH = os.path.join(BASE_DIR, 'iot_sensors.db')
+    # AWS configuration
+    AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+    S3_BUCKET = os.environ.get('S3_BUCKET', 'resqnet-uploads-bucket')
+    KINESIS_STREAM_NAME = os.environ.get('KINESIS_STREAM_NAME', 'resqnet-telemetry-stream')
+    
+    # Redis configuration for SocketIO scale-out
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
     
     # File uploads
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')

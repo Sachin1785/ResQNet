@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import get_db_connection
 from datetime import datetime
 import secrets
-import sqlite3
+import psycopg2
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -178,7 +178,7 @@ def register_responder():
             'message': 'Responder registered successfully'
         }), 201
         
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         conn.close()
         return jsonify({'success': False, 'error': 'Username already exists'}), 400
     except Exception as e:

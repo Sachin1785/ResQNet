@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 from database import get_db_connection
-import sqlite3
 import requests
 
 resources_bp = Blueprint('resources', __name__)

@@ -4,9 +4,11 @@ from dotenv import load_dotenv
 # Load environment variables early
 load_dotenv()
 
-from flask import Flask, jsonify, send_from_directory, request
+from flask import Flask, jsonify, send_from_directory, request, redirect
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from datetime import datetime
+from utils.kinesis_client import put_telemetry_record
 from config import Config
 from database import init_db, seed_sample_data, get_db_connection
 
@@ -18,8 +20,8 @@ Config.init_app(app)
 # Enable CORS
 CORS(app, origins=Config.CORS_ORIGINS, supports_credentials=True)
 
-# Initialize SocketIO for WebSocket support
-socketio = SocketIO(app, cors_allowed_origins=Config.CORS_ORIGINS)
+# Initialize SocketIO for WebSocket support with Redis message queue
+socketio = SocketIO(app, cors_allowed_origins=Config.CORS_ORIGINS, message_queue=Config.REDIS_URL)
 
 # Import and register blueprints
 from routes.incidents import incidents_bp
@@ -74,10 +76,11 @@ def index():
 def health():
     return jsonify({'status': 'healthy', 'database': 'connected'})
 
-# Serve uploaded files
+# Serve uploaded files via S3 redirect proxy
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
-    return send_from_directory(Config.UPLOAD_FOLDER, filename)
+    s3_url = f"https://{Config.S3_BUCKET}.s3.{Config.AWS_REGION}.amazonaws.com/{filename}"
+    return redirect(s3_url)
 
 # ==================== WebSocket Events ====================
 
@@ -131,45 +134,20 @@ def handle_leave_incident(data):
 
 @socketio.on('location_update')
 def handle_location_update(data):
-    """Handle real-time location updates from personnel"""
+    """Handle real-time location updates from personnel by sending to Kinesis"""
     personnel_id = data.get('personnel_id')
     lat = data.get('lat')
     lng = data.get('lng')
     
     if personnel_id and lat and lng:
-        # Update database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE personnel
-            SET lat = ?, lng = ?, updated_at = datetime('now')
-            WHERE id = ?
-        ''', (lat, lng, personnel_id))
-        
-        # Get personnel info
-        cursor.execute('SELECT * FROM personnel WHERE id = ?', (personnel_id,))
-        person = dict(cursor.fetchone())
-        
-        conn.commit()
-        conn.close()
-        
-        # Broadcast to all clients
-        socketio.emit('personnel_location_updated', {
+        payload = {
+            'payload_type': 'location_update',
             'personnel_id': personnel_id,
-            'name': person['name'],
-            'location': {'lat': lat, 'lng': lng},
-            'status': person['status']
-        })
-        
-        # If assigned to incident, broadcast to incident room
-        if person['assigned_incident_id']:
-            socketio.emit('personnel_location_updated', {
-                'personnel_id': personnel_id,
-                'name': person['name'],
-                'location': {'lat': lat, 'lng': lng},
-                'status': person['status']
-            }, room=f'incident_{person["assigned_incident_id"]}')
+            'lat': lat,
+            'lng': lng,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        put_telemetry_record(personnel_id, payload)
 
 @socketio.on('incident_update')
 def handle_incident_update(data):
@@ -328,17 +306,15 @@ def initialize_app():
     """Initialize application on startup"""
     print("🚀 Initializing Crisis Management Backend...")
     
-    # Check if main database exists
-    db_exists = os.path.exists(Config.DATABASE_PATH)
-    
-    if not db_exists:
-        print("📦 Creating main database...")
+    try:
+        print("📦 Initializing database and creating schemas...")
         init_db()
         seed_sample_data()
-    else:
-        print("✅ Database already exists")
+    except Exception as e:
+        print(f"⚠️ Database initialization skipped or failed: {e}")
+        print("   In containerized/AWS environments, verify your DB security groups and configs.")
 
-    # Always ensure the IoT sensor database is initialized (separate file)
+    # Always ensure the IoT sensor database is initialized
     from iot_database import init_iot_db
     init_iot_db()
     

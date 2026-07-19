@@ -1,6 +1,16 @@
-import os
+import boto3
 from werkzeug.utils import secure_filename
 from config import Config
+from datetime import datetime
+
+s3_client = None
+
+def get_s3_client():
+    global s3_client
+    if s3_client is None:
+        # Will pick up standard AWS credential env vars or ECS IAM role automatically
+        s3_client = boto3.client('s3', region_name=Config.AWS_REGION)
+    return s3_client
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -9,7 +19,7 @@ def allowed_file(filename):
 
 def save_file(file, incident_id):
     """
-    Save uploaded file and return file info
+    Save uploaded file to S3 and return file info
     """
     if not file or file.filename == '':
         return None
@@ -17,21 +27,27 @@ def save_file(file, incident_id):
     if not allowed_file(file.filename):
         return None
     
-    # Create incident-specific folder
-    incident_folder = os.path.join(Config.UPLOAD_FOLDER, f'incident_{incident_id}')
-    os.makedirs(incident_folder, exist_ok=True)
-    
     # Secure filename and add timestamp to avoid conflicts
-    from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     original_filename = secure_filename(file.filename)
     filename = f"{timestamp}_{original_filename}"
     
-    filepath = os.path.join(incident_folder, filename)
-    file.save(filepath)
+    # S3 Object Key
+    s3_key = f"incident_{incident_id}/{filename}"
     
-    # Get file size
-    file_size = os.path.getsize(filepath)
+    s3 = get_s3_client()
+    
+    # Read size (seek to end then back to beginning)
+    file.seek(0, 2)
+    file_size = file.tell()
+    file.seek(0)
+    
+    # Upload to S3
+    s3.upload_fileobj(
+        file,
+        Config.S3_BUCKET,
+        s3_key
+    )
     
     # Determine file type
     file_ext = filename.rsplit('.', 1)[1].lower()
@@ -44,7 +60,8 @@ def save_file(file, incident_id):
     else:
         file_type = 'other'
     
-    relative_path = f'uploads/incident_{incident_id}/{filename}'
+    # Return path relative to /uploads proxy in app.py
+    relative_path = f"uploads/{s3_key}"
     
     return {
         'filename': original_filename,
@@ -54,11 +71,15 @@ def save_file(file, incident_id):
     }
 
 def delete_file(filepath):
-    """Delete a file from the filesystem"""
+    """Delete a file from S3"""
     try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        # filepath format is "uploads/incident_ID/filename"
+        # We need to extract the S3 Key: "incident_ID/filename"
+        if filepath.startswith("uploads/"):
+            s3_key = filepath[len("uploads/"):]
+            s3 = get_s3_client()
+            s3.delete_object(Bucket=Config.S3_BUCKET, Key=s3_key)
             return True
     except Exception as e:
-        print(f"Error deleting file: {e}")
+        print(f"Error deleting file from S3: {e}")
     return False

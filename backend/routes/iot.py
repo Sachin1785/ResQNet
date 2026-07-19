@@ -1,8 +1,7 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
+from utils.kinesis_client import put_telemetry_record
 from iot_database import get_iot_db_connection
-from database import get_db_connection       # Only used for incident creation
 from datetime import datetime
-import math
 
 iot_bp = Blueprint('iot', __name__)
 
@@ -12,22 +11,7 @@ iot_bp = Blueprint('iot', __name__)
 @iot_bp.route('/iot/stream', methods=['POST'])
 def handle_iot_stream():
     """
-    Receives sensor data from ESP32 (via Raspberry Pi).
-
-    Expected JSON:
-    {
-        "system_id":   "system1A",
-        "temperature": 30.91,
-        "pressure":    984.10,
-        "altitude":    245.60,
-        "accel_x":    -0.204,
-        "accel_y":     0.065,
-        "accel_z":    10.101,
-        "gas_voltage": 1.96,
-        "water_level": 2,
-        "rain_level":  18,
-        "timestamp":  "ISO_DATE"   (added by the Raspberry Pi gateway)
-    }
+    Receives sensor data from ESP32 (via Raspberry Pi) and routes it to Kinesis.
     """
     data = request.get_json()
     system_id = data.get('system_id')
@@ -35,178 +19,15 @@ def handle_iot_stream():
     if not system_id:
         return jsonify({'success': False, 'error': 'Missing system_id'}), 400
 
-    # ── IoT DB: Read config / auto-register node ──────────────
-    iot_conn = get_iot_db_connection()
-    iot_cur  = iot_conn.cursor()
+    # Enrich payload with routing information
+    data['payload_type'] = 'iot_sensor'
+    if 'timestamp' not in data:
+        data['timestamp'] = datetime.utcnow().isoformat()
 
-    iot_cur.execute('SELECT * FROM iot_configs WHERE system_id = ?', (system_id,))
-    config = iot_cur.fetchone()
+    # Publish to Kinesis Data Stream
+    put_telemetry_record(system_id, data)
 
-    if not config:
-        iot_cur.execute('''
-            INSERT INTO iot_configs (system_id, name, lat, lng, location_name)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (system_id, f'Node {system_id}', 28.6139, 77.2090, 'Auto-detected Location'))
-        iot_conn.commit()
-        iot_cur.execute('SELECT * FROM iot_configs WHERE system_id = ?', (system_id,))
-        config = iot_cur.fetchone()
-
-    config = dict(config)
-
-    # ── Compute Resultant Acceleration (m/s²) ────────────────
-    ax = data.get('accel_x', 0)
-    ay = data.get('accel_y', 0)
-    az = data.get('accel_z', 0)
-    resultant_accl = math.sqrt(ax**2 + ay**2 + az**2)
-
-    # ── Handle Gas Reading (ppm or gas_voltage) ──────────────
-    gas_val = data.get('ppm') if 'ppm' in data else data.get('gas_voltage')
-    if gas_val is None: gas_val = 0
-
-    # ── Threshold check ──────────────────────────────────────
-    alerts_triggered = []
-    if gas_val > config['threshold_gas']:
-        alerts_triggered.append(('fire', 'Gas Leak / Fire Hazard', 'critical'))
-    if data.get('temperature', 0) > config['threshold_temp']:
-        alerts_triggered.append(('fire', 'Critical High Temperature', 'high'))
-    if data.get('water_level', 0) > config['threshold_water']:
-        alerts_triggered.append(('natural_disaster', 'Flood Detection', 'high'))
-    if resultant_accl > config['threshold_accl']:
-        alerts_triggered.append(('natural_disaster', 'Seismic Activity / Earthquake', 'critical'))
-    if data.get('rain_level', 0) > config['threshold_rain']:
-        alerts_triggered.append(('natural_disaster', 'Heavy Rain Alert', 'medium'))
-
-    # ── Log Throttling ────────────────────────────────────────
-    # We broadcast LIVE data via WebSocket every time, but we 
-    # only SAVE to the database once every 2 minutes (Normal)
-    # or every 10 seconds (Alert triggered) to prevent bloat.
-    has_alert = len(alerts_triggered) > 0
-    throttle_seconds = 10 if has_alert else 120 
-    
-    # Calculate time since last log (stored in config['updated_at'])
-    # Using fromisoformat is more robust than strptime for varying SQLite formats
-    try:
-        if config.get('updated_at'):
-            ts_str = config['updated_at'].replace(' ', 'T')
-            last_updated = datetime.fromisoformat(ts_str)
-        else:
-            last_updated = datetime.min
-    except Exception:
-        last_updated = datetime.min
-        
-    time_since_last = (datetime.utcnow() - last_updated).total_seconds()
-
-    if time_since_last >= throttle_seconds:
-        # ── IoT DB: Log raw reading ───────────────────────────
-        iot_cur.execute('''
-            INSERT INTO iot_logs (
-                system_id, gas, temp, water, accl,
-                pressure, altitude, rain_level, accel_x, accel_y, accel_z
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            system_id, gas_val, data.get('temperature'), data.get('water_level'),
-            round(resultant_accl, 3), data.get('pressure'), data.get('altitude'),
-            data.get('rain_level'), ax, ay, az
-        ))
-        # Update throttle timestamp
-        iot_cur.execute('UPDATE iot_configs SET updated_at = CURRENT_TIMESTAMP WHERE system_id = ?', (system_id,))
-        iot_conn.commit()
-    
-    iot_conn.close()   # ← Release IoT DB lock immediately
-
-    # ── Main DB: Create/merge incidents (only if alert) ──────
-    # This DB write is rare (only on threshold breach) so lock
-    # contention here is minimal.
-    if alerts_triggered:
-        crisis_conn = get_db_connection()
-        crisis_cur  = crisis_conn.cursor()
-
-        for incident_type, alert_title, severity in alerts_triggered:
-            crisis_cur.execute('''
-                SELECT id, report_count FROM incidents
-                WHERE type = ? AND system_id_source = ? AND status = 'active'
-            ''', (incident_type, system_id))
-
-            existing = crisis_cur.fetchone()
-
-            if existing:
-                new_count = (existing['report_count'] or 1) + 1
-                
-                # Check for cooldown on updates to PREVENT DB FLOODING
-                # Report counts update in main DB only every 1 minute
-                crisis_cur.execute('''
-                    SELECT id FROM incidents 
-                    WHERE id = ? AND updated_at < datetime('now', '-1 minutes')
-                ''', (existing['id'],))
-                can_update_main = crisis_cur.fetchone() is not None or existing['report_count'] == 1
-
-                if can_update_main:
-                    crisis_cur.execute('''
-                        UPDATE incidents SET report_count = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    ''', (new_count, existing['id']))
-                
-                # Independent 5-minute cooldown for Timeline Events (Text logs)
-                crisis_cur.execute('''
-                    SELECT id FROM incidents 
-                    WHERE id = ? AND updated_at < datetime('now', '-5 minutes')
-                ''', (existing['id'],))
-                should_add_timeline = crisis_cur.fetchone() is not None or existing['report_count'] == 1
-
-                if should_add_timeline:
-                    crisis_cur.execute('''
-                        INSERT INTO incident_timeline (incident_id, event_type, description, user_name)
-                        VALUES (?, 'sensor_update', ?, 'IoT System')
-                    ''', (existing['id'], f'Ongoing alert: {alert_title} (detected {new_count} times)'))
-            else:
-                crisis_cur.execute('''
-                    INSERT INTO incidents (
-                        title, description, type, severity, status,
-                        lat, lng, location_name, report_source, system_id_source, report_count
-                    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, 'iot_sensor', ?, 1)
-                ''', (
-                    f'SENSORS: {alert_title} ({system_id})',
-                    f'Automated alert from sensor {system_id} at {config["location_name"]}.',
-                    incident_type, severity,
-                    config['lat'], config['lng'], config['location_name'], system_id
-                ))
-                new_id = crisis_cur.lastrowid
-                crisis_cur.execute('''
-                    INSERT INTO incident_timeline (incident_id, event_type, description, user_name)
-                    VALUES (?, 'incident_created', ?, 'IoT System')
-                ''', (new_id, f'Incident auto-detected by sensor {system_id}'))
-
-        crisis_conn.commit()
-        crisis_conn.close()  # ← Release main DB lock immediately
-
-    # ── WebSocket: Broadcast live data to dashboard ──────────
-    if hasattr(current_app, 'broadcast_event'):
-        current_app.broadcast_event('iot_data_stream', {
-            'system_id':  system_id,
-            'name':       config['name'],
-            'values': {
-                'gas':      gas_val,
-                'gas_unit': 'ppm' if 'ppm' in data else 'V',
-                'temp':     data.get('temperature'),
-                'water':    data.get('water_level'),
-                'accl':     round(resultant_accl, 3),
-                'pressure': data.get('pressure'),
-                'altitude': data.get('altitude'),
-                'rain':     data.get('rain_level'),
-                'accel_x':  ax,
-                'accel_y':  ay,
-                'accel_z':  az
-            },
-            'alerts':    [a[1] for a in alerts_triggered],
-            'location': {
-                'lat':  config['lat'],
-                'lng':  config['lng'],
-                'name': config['location_name']
-            },
-            'timestamp': datetime.utcnow().isoformat()
-        })
-
-    return jsonify({'success': True, 'alerts_triggered': len(alerts_triggered)}), 200
+    return jsonify({'success': True, 'message': 'Payload streamed to ingestion buffer'}), 202
 
 
 # ─────────────────────────────────────────────────────────────
@@ -236,18 +57,18 @@ def update_iot_config():
     conn = get_iot_db_connection()
     cur  = conn.cursor()
 
-    cur.execute('SELECT id FROM iot_configs WHERE system_id = ?', (system_id,))
+    cur.execute('SELECT id FROM iot_configs WHERE system_id = %s', (system_id,))
     exists = cur.fetchone()
     now    = datetime.utcnow().isoformat()
 
     if exists:
         cur.execute('''
             UPDATE iot_configs
-            SET name = ?, lat = ?, lng = ?, location_name = ?,
-                threshold_gas = ?, threshold_temp = ?, threshold_water = ?,
-                threshold_accl = ?, threshold_rain = ?, threshold_pressure = ?,
-                updated_at = ?
-            WHERE system_id = ?
+            SET name = %s, lat = %s, lng = %s, location_name = %s,
+                threshold_gas = %s, threshold_temp = %s, threshold_water = %s,
+                threshold_accl = %s, threshold_rain = %s, threshold_pressure = %s,
+                updated_at = %s
+            WHERE system_id = %s
         ''', (
             data.get('name'), data.get('lat'), data.get('lng'), data.get('location_name'),
             data.get('threshold_gas'), data.get('threshold_temp'), data.get('threshold_water'),
@@ -260,7 +81,7 @@ def update_iot_config():
                 system_id, name, lat, lng, location_name,
                 threshold_gas, threshold_temp, threshold_water,
                 threshold_accl, threshold_rain, threshold_pressure
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             system_id, data.get('name'), data.get('lat'), data.get('lng'),
             data.get('location_name'), data.get('threshold_gas', 2.5),
@@ -284,9 +105,9 @@ def get_iot_logs(system_id):
     cur   = conn.cursor()
     cur.execute('''
         SELECT * FROM iot_logs
-        WHERE system_id = ?
+        WHERE system_id = %s
         ORDER BY timestamp DESC
-        LIMIT ?
+        LIMIT %s
     ''', (system_id, limit))
     logs = [dict(row) for row in cur.fetchall()]
     conn.close()

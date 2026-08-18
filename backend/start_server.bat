@@ -21,4 +21,5 @@ echo.
 echo Press Ctrl+C to stop the server
 echo.
 
+set PYTHONIOENCODING=utf-8
 python app.py

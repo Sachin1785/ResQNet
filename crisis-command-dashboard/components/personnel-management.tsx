@@ -6,13 +6,23 @@ import { authAPI, personnelAPI } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useWebSocket } from "@/hooks/use-websocket"
 
-export function PersonnelManagement({ onSelectPersonnel, selectedPersonnelId }: { onSelectPersonnel?: (person: any) => void, selectedPersonnelId?: number }) {
+export function PersonnelManagement({
+    onSelectPersonnel,
+    selectedPersonnelId,
+    customPersonnel
+}: {
+    onSelectPersonnel?: (person: any) => void;
+    selectedPersonnelId?: number;
+    customPersonnel?: any[];
+}) {
     const [personnel, setPersonnel] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [showAddForm, setShowAddForm] = useState(false)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [success, setSuccess] = useState<string | null>(null)
+
+    const activePersonnelList = customPersonnel || personnel
 
     const { on, isConnected } = useWebSocket({
         onConnect: () => console.log('Team Dashboard connected to WebSocket'),
@@ -29,6 +39,10 @@ export function PersonnelManagement({ onSelectPersonnel, selectedPersonnelId }: 
     })
 
     const fetchPersonnel = async () => {
+        if (customPersonnel) {
+            setLoading(false)
+            return
+        }
         try {
             setLoading(true)
             const response = await personnelAPI.getAll()
@@ -43,8 +57,12 @@ export function PersonnelManagement({ onSelectPersonnel, selectedPersonnelId }: 
     }
 
     useEffect(() => {
-        fetchPersonnel()
-    }, [])
+        if (!customPersonnel) {
+            fetchPersonnel()
+        } else {
+            setLoading(false)
+        }
+    }, [customPersonnel])
 
     // Real-time updates
     useEffect(() => {
@@ -220,13 +238,13 @@ export function PersonnelManagement({ onSelectPersonnel, selectedPersonnelId }: 
                 )}
 
                 <div className="space-y-2">
-                    <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1 mb-2">Active Responders ({personnel.length})</h3>
-                    {loading && personnel.length === 0 ? (
+                    <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1 mb-2">Active Responders ({activePersonnelList.length})</h3>
+                    {loading && activePersonnelList.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-10 opacity-50">
                             <Loader2 className="w-8 h-8 animate-spin mb-2" />
                             <p className="text-xs">Loading team...</p>
                         </div>
-                    ) : personnel.length === 0 ? (
+                    ) : activePersonnelList.length === 0 ? (
                         <div className="text-center py-10 bg-muted/20 border border-dashed border-border rounded-2xl">
                             <Users className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-20" />
                             <p className="text-sm text-muted-foreground">No responders found.</p>
@@ -238,7 +256,7 @@ export function PersonnelManagement({ onSelectPersonnel, selectedPersonnelId }: 
                             </button>
                         </div>
                     ) : (
-                        personnel.map((person) => (
+                        activePersonnelList.map((person) => (
                             <div
                                 key={person.id}
                                 className={cn(

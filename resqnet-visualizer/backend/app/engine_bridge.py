@@ -171,7 +171,7 @@ class EngineBridge:
                     needed = inc.remaining_requirements.get(unit.type, 0)
                     
                     if needed > 0:
-                        dist = float(torch.norm(responder_states[resp_idx] - node_embeddings[d_graph.node_id_to_idx[inc.location]])) * 100
+                        dist = float(torch.norm(responder_states[resp_idx] - node_embeddings[d_graph.node_id_to_idx[inc.location]]).detach()) * 100
                         
                         try:
                             route = nx.shortest_path(self.graph, int(unit.current_location), int(inc.location))

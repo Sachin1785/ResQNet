@@ -1,292 +1,528 @@
-"use client"
+"use client";
 
-import { useEffect, useRef } from "react"
-import L from "leaflet"
-import "leaflet/dist/leaflet.css"
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import DeckGL from "@deck.gl/react";
+import { ScatterplotLayer, PathLayer, TextLayer } from "@deck.gl/layers";
+import MapLibreMap from "react-map-gl/maplibre";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { fetchRoadGeometry } from "@/lib/routing";
 
 interface MapComponentProps {
   incidents: Array<{
-    id: number
-    title: string
-    location: { lat: number; lng: number }
-    severity: "critical" | "high" | "medium" | "low"
-    status: string
-    responders: string[]
-  }>
-  selectedIncident: any | null
-  selectedPersonnel: any | null
+    id: number;
+    title: string;
+    location: { lat: number; lng: number };
+    severity: "critical" | "high" | "medium" | "low";
+    status: string;
+    responders: string[];
+    reportCount?: number;
+  }>;
+  selectedIncident: any | null;
+  selectedPersonnel: any | null;
   personnel: Array<{
-    id: number
-    name: string
-    location: { lat: number; lng: number } | null
-    status: "on-scene" | "en-route" | "available"
-    assignedIncident: number | null
-    role: string
-  }>
+    id: number;
+    name: string;
+    location: { lat: number; lng: number } | null;
+    status: "on-scene" | "en-route" | "responding" | "available";
+    assignedIncident: number | null;
+    role: string;
+  }>;
   resources?: Array<{
-    id: number
-    name: string
-    type: string
-    status: string
-    location: { lat: number; lng: number } | null
-    assigned_incident_id?: number
-  }>
-  isLocationPickerActive?: boolean
-  onMapClick?: (lat: number, lng: number) => void
+    id: number;
+    name: string;
+    type: string;
+    status: string;
+    location: { lat: number; lng: number } | null;
+    assigned_incident_id?: number;
+  }>;
+  isLocationPickerActive?: boolean;
+  onMapClick?: (lat: number, lng: number) => void;
 }
 
-export default function MapComponent({ incidents, selectedIncident, selectedPersonnel, personnel, resources, isLocationPickerActive, onMapClick }: MapComponentProps) {
-  const mapRef = useRef<L.Map | null>(null)
-  const markersRef = useRef<Record<number, L.Marker>>({})
-  const personnelMarkersRef = useRef<Record<number, L.Marker>>({})
-  const resourceMarkersRef = useRef<Record<number, L.Marker>>({})
+const CARTO_LIGHT_STYLE = {
+  version: 8,
+  sources: {
+    "carto-voyager": {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      attribution: "&copy; CARTO &copy; OpenStreetMap",
+    },
+  },
+  layers: [
+    {
+      id: "carto-voyager-layer",
+      type: "raster",
+      source: "carto-voyager",
+      minzoom: 0,
+      maxzoom: 20,
+    },
+  ],
+};
 
-  const prevSelectedIdRef = useRef<number | null>(null)
-  const prevSelectedPersonnelIdRef = useRef<number | null>(null)
-  const mapInitializedRef = useRef(false)
+const SEVERITY_COLORS: Record<string, [number, number, number]> = {
+  critical: [220, 38, 38], // Vivid Red
+  high: [234, 88, 12],     // Vibrant Orange
+  medium: [202, 138, 4],    // Deep Gold
+  low: [22, 163, 74],       // Emerald Green
+};
 
+const STATUS_COLORS: Record<string, [number, number, number]> = {
+  "on-scene": [5, 150, 105],  // Emerald
+  "responding": [217, 119, 6], // Deep Amber
+  "en-route": [217, 119, 6],   // Deep Amber
+  "available": [37, 99, 235],  // Royal Blue
+};
+
+export default function MapComponent({
+  incidents,
+  selectedIncident,
+  selectedPersonnel,
+  personnel,
+  resources = [],
+  isLocationPickerActive,
+  onMapClick,
+}: MapComponentProps) {
+  // Default camera center (detect from incidents or Mumbai fallback)
+  const defaultCenter = useMemo(() => {
+    if (incidents.length > 0 && incidents[0]?.location?.lat) {
+      return { longitude: incidents[0].location.lng, latitude: incidents[0].location.lat };
+    }
+    return { longitude: 72.83, latitude: 19.06 };
+  }, [incidents]);
+
+  const [viewState, setViewState] = useState({
+    longitude: defaultCenter.longitude,
+    latitude: defaultCenter.latitude,
+    zoom: 12.5,
+    pitch: 25,
+    bearing: 0,
+  });
+
+  const [hoverInfo, setHoverInfo] = useState<{
+    x: number;
+    y: number;
+    object: any;
+    type: "incident" | "person" | "resource" | "route";
+  } | null>(null);
+
+  // Road geometry cache state: routeKey -> [lng, lat][]
+  const [roadGeometries, setRoadGeometries] = useState<Record<string, [number, number][]>>({});
+
+  // Auto-center camera when selection changes
   useEffect(() => {
-    if (!mapRef.current) {
-      mapRef.current = L.map("map", {
-        center: [incidents[0]?.location.lat || 28.6139, incidents[0]?.location.lng || 77.2090],
-        zoom: 13,
-        zoomControl: true,
-      })
-
-      L.tileLayer("https://{s}.tile.osm.org/{z}/{x}/{y}.png", {
-        attribution: "© OSM",
-        maxZoom: 19,
-      }).addTo(mapRef.current)
-
-      mapInitializedRef.current = true
+    if (selectedIncident?.location?.lat) {
+      setViewState((prev) => ({
+        ...prev,
+        longitude: selectedIncident.location.lng,
+        latitude: selectedIncident.location.lat,
+        zoom: 15,
+        transitionDuration: 800,
+      } as any));
+    } else if (selectedPersonnel?.location?.lat) {
+      setViewState((prev) => ({
+        ...prev,
+        longitude: selectedPersonnel.location.lng,
+        latitude: selectedPersonnel.location.lat,
+        zoom: 15,
+        transitionDuration: 800,
+      } as any));
     }
+  }, [selectedIncident, selectedPersonnel]);
 
-    // Add cursor style class globally if needed, or handle in the MapEvents
-    if (mapRef.current) {
-        if (isLocationPickerActive) {
-            mapRef.current.getContainer().style.cursor = 'crosshair'
-        } else {
-            mapRef.current.getContainer().style.cursor = ''
-        }
-    }
-    
-    // Click handler for map
-    mapRef.current.off('click')
-    mapRef.current.on('click', (e: L.LeafletMouseEvent) => {
-        if (onMapClick) {
-            onMapClick(e.latlng.lat, e.latlng.lng)
-        }
-    })
+  // Fetch actual turn-by-turn road geometry for each assigned responder
+  useEffect(() => {
+    let isCancelled = false;
 
-
-    // Update incident markers
-    Object.values(markersRef.current).forEach((marker) => marker.remove())
-    markersRef.current = {}
-
-    incidents.forEach((incident) => {
-      const isSelected = selectedIncident?.id === incident.id
-      const iconSize = isSelected ? [48, 48] : [40, 40]
-
-      let color = "#ef4444" // critical
-      if (incident.severity === "high") color = "#f97316"
-      if (incident.severity === "medium") color = "#eab308"
-      if (incident.severity === "low") color = "#22c55e"
-
-      const svgIcon = `
-        <svg width="${iconSize[0]}" height="${iconSize[1]}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="18" fill="${color}" opacity="0.2">
-            ${isSelected ? '<animate attributeName="r" values="14;18;14" dur="2s" repeatCount="indefinite" />' : ''}
-          </circle>
-          <circle cx="20" cy="20" r="12" fill="${color}"/>
-          <circle cx="20" cy="20" r="6" fill="white"/>
-        </svg>
-      `
-
-      const icon = L.divIcon({
-        html: svgIcon,
-        className: `incident-marker ${isSelected ? 'selected' : ''}`,
-        iconSize: iconSize as [number, number],
-        iconAnchor: [iconSize[0] / 2, iconSize[1] / 2],
-      })
-
-      const marker = L.marker([incident.location.lat, incident.location.lng], { icon })
-        .bindPopup(`
-          <div class="p-2 min-w-[200px]">
-            <div class="font-bold text-lg mb-1">${incident.title}</div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="text-xs px-2 py-0.5 rounded-full" style="background: ${color}20; color: ${color}">${incident.severity.toUpperCase()}</span>
-              <span class="text-xs text-muted-foreground capitalize">${incident.status}</span>
-            </div>
-            <div class="text-sm text-muted-foreground italic mb-1">Personnel: ${incident.responders.length}</div>
-            ${(incident as any).reportCount > 1 ? `<div class="text-xs font-bold text-red-500 mt-2">⚠️ ${(incident as any).reportCount} Merged Reports</div>` : ""}
-          </div>
-        `, { closeButton: false })
-        .addTo(mapRef.current!)
-
-      markersRef.current[incident.id] = marker
-
-      // ONLY set view if the selection just changed
-      if (isSelected && prevSelectedIdRef.current !== incident.id) {
-        mapRef.current?.setView([incident.location.lat, incident.location.lng], 16, {
-          animate: true,
-          duration: 1
-        })
+    const incidentMap = new globalThis.Map<number, { lat: number; lng: number }>();
+    incidents.forEach((inc) => {
+      if (inc.location?.lat && inc.location?.lng) {
+        incidentMap.set(inc.id, { lat: inc.location.lat, lng: inc.location.lng });
       }
-    })
+    });
 
-    // Update personnel markers (THE REAL-TIME PLOTTING)
-    Object.values(personnelMarkersRef.current).forEach((marker) => marker.remove())
-    personnelMarkersRef.current = {}
+    const fetchAllRoutes = async () => {
+      const updates: Record<string, [number, number][]> = {};
 
-    personnel.forEach((person) => {
-      if (!person.location) return
-
-      const isSelected = selectedPersonnel?.id === person.id
-      let color = "#3b82f6" // blue
-      let statusIcon = "🚶"
-      if (person.status === "on-scene") {
-        color = "#10b981" // green
-        statusIcon = "📍"
-      } else if (person.status === "en-route") {
-        color = "#f59e0b" // amber
-        statusIcon = "🚑"
+      for (const person of personnel) {
+        if (person.assignedIncident && person.location?.lat && person.location?.lng) {
+          const target = incidentMap.get(person.assignedIncident);
+          if (target) {
+            const key = `person-${person.id}-${person.assignedIncident}`;
+            const coords = await fetchRoadGeometry(
+              [person.location.lng, person.location.lat],
+              [target.lng, target.lat]
+            );
+            if (!isCancelled) {
+              updates[key] = coords;
+            }
+          }
+        }
       }
 
-      const personIcon = `
-        <div class="relative group">
-          <div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground px-2 py-1 rounded shadow-md text-[10px] font-bold whitespace-nowrap ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity">
-            ${person.name} ${isSelected ? '(FOLLOWING)' : ''}
-          </div>
-          <svg width="40" height="40" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="18" cy="18" r="16" fill="${color}" opacity="0.2">
-               ${isSelected ? '<animate attributeName="r" values="12;16;12" dur="1s" repeatCount="indefinite" />' : ''}
-            </circle>
-            <circle cx="18" cy="18" r="12" fill="${color}" opacity="0.4"/>
-            <circle cx="18" cy="18" r="8" fill="${color}"/>
-            <text x="18" y="21" font-size="10" text-anchor="middle" fill="white" font-weight="bold">${person.name[0]}</text>
-          </svg>
-        </div>
-      `
-
-      const icon = L.divIcon({
-        html: personIcon,
-        className: `personnel-marker-container ${isSelected ? 'selected' : ''}`,
-        iconSize: [40, 40] as [number, number],
-        iconAnchor: [20, 20],
-      })
-
-      const marker = L.marker([person.location.lat, person.location.lng], {
-        icon,
-        zIndexOffset: isSelected ? 2000 : 1000
-      })
-        .bindPopup(`
-          <div class="p-2">
-            <div class="font-bold">${person.name}</div>
-            <div class="text-xs text-muted-foreground mb-1">${person.role}</div>
-            <div class="flex items-center gap-1 mt-1">
-              <div class="w-2 h-2 rounded-full" style="background: ${color}"></div>
-              <span class="text-xs font-medium capitalize">${person.status}</span>
-            </div>
-            ${person.assignedIncident ? `<div class="text-[10px] mt-2 border-t pt-1">Assigned to Incident #${person.assignedIncident}</div>` : ""}
-          </div>
-        `)
-        .addTo(mapRef.current!)
-
-      personnelMarkersRef.current[person.id] = marker
-
-      // Live follow for selected personnel
-      if (isSelected) {
-        mapRef.current?.setView([person.location.lat, person.location.lng], mapRef.current.getZoom(), {
-          animate: true,
-          duration: 0.5
-        })
-      }
-    })
-
-    // Update resource markers - RESTORED
-    Object.values(resourceMarkersRef.current).forEach((marker) => marker.remove())
-    resourceMarkersRef.current = {}
-
-    if (resources) {
-        resources.forEach((resource) => {
-        if (!resource.location) return
-
-        let color = "#8b5cf6" // purple for resources
-        let iconChar = "📦" // default package
-
-        // Customize based on type
-        const type = resource.type.toLowerCase()
-        if (type.includes('vehicle') || type.includes('ambulance') || type.includes('truck')) {
-            color = "#ec4899" // pink
-            iconChar = "🚑"
-        } else if (type.includes('medical') || type.includes('kit')) {
-            color = "#ef4444" // red
-            iconChar = "⚕️"
-        } else if (type.includes('food') || type.includes('water')) {
-            color = "#0ea5e9" // sky
-            iconChar = "💧"
-        } else if (type.includes('shelter')) {
-            color = "#f97316" // orange
-            iconChar = "⛺"
-        } else if (type.includes('police')) {
-            color = "#1e40af" // blue
-            iconChar = "👮"
+      for (const res of resources) {
+        if (res.assigned_incident_id && res.location?.lat && res.location?.lng) {
+          const target = incidentMap.get(res.assigned_incident_id);
+          if (target) {
+            const key = `res-${res.id}-${res.assigned_incident_id}`;
+            const coords = await fetchRoadGeometry(
+              [res.location.lng, res.location.lat],
+              [target.lng, target.lat]
+            );
+            if (!isCancelled) {
+              updates[key] = coords;
+            }
+          }
         }
+      }
 
-        const resourceIcon = `
-            <div class="relative group">
-            <div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground px-2 py-1 rounded shadow-md text-[10px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                ${resource.name}
-            </div>
-            <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-                <rect x="6" y="6" width="20" height="20" rx="4" fill="${color}" opacity="0.8" stroke="white" stroke-width="2"/>
-                <text x="16" y="20" font-size="12" text-anchor="middle" fill="white">${iconChar}</text>
-            </svg>
-            </div>
-        `
+      if (!isCancelled && Object.keys(updates).length > 0) {
+        setRoadGeometries((prev) => ({ ...prev, ...updates }));
+      }
+    };
 
-        const icon = L.divIcon({
-            html: resourceIcon,
-            className: `resource-marker-container`,
-            iconSize: [32, 32] as [number, number],
-            iconAnchor: [16, 16],
-        })
-
-        const marker = L.marker([resource.location.lat, resource.location.lng], {
-            icon,
-            zIndexOffset: 900 // Below personnel, above map
-        })
-            .bindPopup(`
-            <div class="p-2">
-                <div class="font-bold">${resource.name}</div>
-                <div class="text-xs text-muted-foreground mb-1">${resource.type}</div>
-                <div class="flex items-center gap-1 mt-1">
-                <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 capitalize">${resource.status}</span>
-                </div>
-                ${(resource as any).assigned_incident_id ? `<div class="text-[10px] mt-2 border-t pt-1">Assigned to Incident #${(resource as any).assigned_incident_id}</div>` : ""}
-            </div>
-            `)
-            .addTo(mapRef.current!)
-
-        resourceMarkersRef.current[resource.id] = marker
-        })
-    }
-
-    // Fit bounds on first load if we have data
-    if (!mapInitializedRef.current && (incidents.length > 0 || (resources && resources.length > 0))) {
-         // Auto-fit logic could go here, but for now we trust the initial center or user nav
-         // We removed the aggressive auto-fit to avoid jumping, but user can re-enable if desired
-    }
-
-
-    // Store current IDs for next iteration
-    prevSelectedIdRef.current = selectedIncident?.id || null
-    prevSelectedPersonnelIdRef.current = selectedPersonnel?.id || null
+    fetchAllRoutes();
 
     return () => {
-      // Cleanup
-    }
-  }, [incidents, selectedIncident, selectedPersonnel, personnel, resources, isLocationPickerActive, onMapClick])
+      isCancelled = true;
+    };
+  }, [incidents, personnel, resources]);
 
-  return <div id="map" className="w-full h-full" />
+  // Compute active dispatch routes (Paths connecting responders to their assigned incidents)
+  const dispatchRoutes = useMemo(() => {
+    const routes: Array<{
+      id: string;
+      responderName: string;
+      role: string;
+      incidentTitle: string;
+      severity: string;
+      path: [number, number][];
+      color: [number, number, number];
+    }> = [];
+
+    const incidentMap = new globalThis.Map<number, { lat: number; lng: number; title: string; severity: string }>();
+    incidents.forEach((inc) => {
+      if (inc.location?.lat && inc.location?.lng) {
+        incidentMap.set(inc.id, {
+          lat: inc.location.lat,
+          lng: inc.location.lng,
+          title: inc.title,
+          severity: inc.severity,
+        });
+      }
+    });
+
+    // 1. Routes from assigned personnel to incidents
+    personnel.forEach((person) => {
+      if (person.assignedIncident && person.location?.lat && person.location?.lng) {
+        const target = incidentMap.get(person.assignedIncident);
+        if (target) {
+          const routeKey = `person-${person.id}-${person.assignedIncident}`;
+          const roadPath = roadGeometries[routeKey] || [
+            [person.location.lng, person.location.lat],
+            [target.lng, target.lat],
+          ];
+
+          routes.push({
+            id: `route-${routeKey}`,
+            responderName: person.name,
+            role: person.role,
+            incidentTitle: target.title,
+            severity: target.severity,
+            path: roadPath,
+            color: [37, 99, 235], // Rich Royal Blue for personnel road route
+          });
+        }
+      }
+    });
+
+    // 2. Routes from assigned resources/equipment to incidents
+    resources.forEach((res) => {
+      if (res.assigned_incident_id && res.location?.lat && res.location?.lng) {
+        const target = incidentMap.get(res.assigned_incident_id);
+        if (target) {
+          const routeKey = `res-${res.id}-${res.assigned_incident_id}`;
+          const roadPath = roadGeometries[routeKey] || [
+            [res.location.lng, res.location.lat],
+            [target.lng, target.lat],
+          ];
+
+          routes.push({
+            id: `route-${routeKey}`,
+            responderName: res.name,
+            role: res.type,
+            incidentTitle: target.title,
+            severity: target.severity,
+            path: roadPath,
+            color: [219, 39, 119], // Deep Pink for equipment route
+          });
+        }
+      }
+    });
+
+    return routes;
+  }, [incidents, personnel, resources, roadGeometries]);
+
+  // Valid personnel with locations
+  const activePersonnel = useMemo(() => {
+    return personnel.filter((p) => p.location?.lat && p.location?.lng);
+  }, [personnel]);
+
+  // Valid resources with locations
+  const activeResources = useMemo(() => {
+    return resources.filter((r) => r.location?.lat && r.location?.lng);
+  }, [resources]);
+
+  // Handle map click (including location picker support)
+  const handleClick = useCallback(
+    (info: any) => {
+      if (onMapClick && info.coordinate) {
+        onMapClick(info.coordinate[1], info.coordinate[0]);
+      }
+    },
+    [onMapClick]
+  );
+
+  const layers = [
+    // 1. Dispatch Path Layer (Turn-by-turn road snapping lines)
+    new PathLayer({
+      id: "live-dispatch-routes",
+      data: dispatchRoutes,
+      pickable: true,
+      widthUnits: "pixels",
+      getPath: (d: any) => d.path,
+      getColor: (d: any) => [...d.color, 240],
+      getWidth: (d: any) => (selectedIncident?.id || selectedPersonnel?.id ? 5 : 4),
+      dashJustified: true,
+      onHover: (info) =>
+        setHoverInfo(
+          info.object ? { x: info.x, y: info.y, object: info.object, type: "route" } : null
+        ),
+    }),
+
+    // 2. Incident Halo Layer (Urgency Rings for Critical Incidents)
+    new ScatterplotLayer({
+      id: "incident-halos",
+      data: incidents.filter((inc) => inc.location?.lat && inc.location?.lng),
+      pickable: false,
+      radiusUnits: "pixels",
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getRadius: (d: any) => (d.severity === "critical" || d.id === selectedIncident?.id ? 24 : 16),
+      getFillColor: (d: any) => [
+        ...(SEVERITY_COLORS[d.severity] || [220, 38, 38]),
+        d.id === selectedIncident?.id ? 100 : 40,
+      ],
+      stroked: true,
+      getLineColor: (d: any) => [...(SEVERITY_COLORS[d.severity] || [220, 38, 38]), 200],
+      getLineWidth: 2,
+    }),
+
+    // 3. Incident Core Scatterplot Layer
+    new ScatterplotLayer({
+      id: "incidents-core",
+      data: incidents.filter((inc) => inc.location?.lat && inc.location?.lng),
+      pickable: true,
+      radiusUnits: "pixels",
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getRadius: (d: any) => (d.id === selectedIncident?.id ? 13 : 10),
+      getFillColor: (d: any) => [...(SEVERITY_COLORS[d.severity] || [220, 38, 38]), 255],
+      stroked: true,
+      getLineColor: [255, 255, 255, 255],
+      getLineWidth: 2,
+      onHover: (info) =>
+        setHoverInfo(
+          info.object ? { x: info.x, y: info.y, object: info.object, type: "incident" } : null
+        ),
+    }),
+
+    // 4. Incident Labels Text Layer
+    new TextLayer({
+      id: "incident-labels",
+      data: incidents.filter((inc) => inc.location?.lat && inc.location?.lng),
+      pickable: false,
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getText: (d: any) => d.title.substring(0, 18),
+      getSize: 11,
+      getColor: [15, 23, 42, 255],
+      getAngle: 0,
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "bottom",
+      getPixelOffset: [0, -16],
+      backgroundColor: [255, 255, 255, 230],
+      backgroundPadding: [5, 2],
+      fontWeight: "bold",
+    }),
+
+    // 5. Personnel Scatterplot Layer
+    new ScatterplotLayer({
+      id: "personnel-markers",
+      data: activePersonnel,
+      pickable: true,
+      radiusUnits: "pixels",
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getRadius: (d: any) => (d.id === selectedPersonnel?.id ? 14 : 11),
+      getFillColor: (d: any) => [...(STATUS_COLORS[d.status] || [37, 99, 235]), 255],
+      stroked: true,
+      getLineColor: [255, 255, 255, 255],
+      getLineWidth: 2,
+      onHover: (info) =>
+        setHoverInfo(
+          info.object ? { x: info.x, y: info.y, object: info.object, type: "person" } : null
+        ),
+    }),
+
+    // 6. Personnel Initials Text Layer
+    new TextLayer({
+      id: "personnel-initials",
+      data: activePersonnel,
+      pickable: false,
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getText: (d: any) => d.name.charAt(0).toUpperCase(),
+      getSize: 11,
+      getColor: [255, 255, 255, 255],
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "center",
+      fontWeight: "bold",
+    }),
+
+    // 7. Equipment & Resources Scatterplot Layer
+    new ScatterplotLayer({
+      id: "resource-markers",
+      data: activeResources,
+      pickable: true,
+      radiusUnits: "pixels",
+      getPosition: (d: any) => [d.location.lng, d.location.lat],
+      getRadius: 8,
+      getFillColor: [147, 51, 234, 240], // Vibrant Purple
+      stroked: true,
+      getLineColor: [255, 255, 255, 240],
+      getLineWidth: 1.5,
+      onHover: (info) =>
+        setHoverInfo(
+          info.object ? { x: info.x, y: info.y, object: info.object, type: "resource" } : null
+        ),
+    }),
+  ];
+
+  return (
+    <div className="w-full h-full relative overflow-hidden bg-slate-100">
+      <DeckGL
+        viewState={viewState}
+        onViewStateChange={(e: any) => setViewState(e.viewState)}
+        controller={true}
+        layers={layers}
+        onClick={handleClick}
+        getCursor={() => (isLocationPickerActive ? "crosshair" : "grab")}
+      >
+        <MapLibreMap mapStyle={CARTO_LIGHT_STYLE as any} />
+      </DeckGL>
+
+      {/* Floating HUD: Route / Legend summary */}
+      <div className="absolute top-4 left-4 pointer-events-none z-10 flex flex-col gap-2">
+        {dispatchRoutes.length > 0 && (
+          <div className="bg-slate-900/90 backdrop-blur-md border border-blue-500/40 rounded-lg px-3 py-1.5 shadow-lg flex items-center gap-2 text-xs font-mono text-cyan-300">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+            <span>
+              {dispatchRoutes.length} ACTIVE DISPATCH ROUTE{dispatchRoutes.length > 1 ? "S" : ""}
+              {dispatchRoutes.length > 0 && (
+                <span className="text-slate-400 font-sans ml-1 text-[11px]">
+                  ({dispatchRoutes.filter((r) => r.id.startsWith("route-person")).length} Responders, {dispatchRoutes.filter((r) => r.id.startsWith("route-res")).length} Vehicles)
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+        {isLocationPickerActive && (
+          <div className="bg-amber-900/90 backdrop-blur-md border border-amber-500 rounded-lg px-3 py-2 shadow-lg text-xs text-amber-200 animate-pulse">
+            📍 Click anywhere on the map to set resource coordinates
+          </div>
+        )}
+      </div>
+
+      {/* Interactive Tooltip Card */}
+      {hoverInfo && (
+        <div
+          className="absolute z-50 pointer-events-none bg-slate-900/95 backdrop-blur-md border border-slate-700 text-white rounded-lg p-3 shadow-2xl text-xs max-w-xs transition-all"
+          style={{ left: hoverInfo.x + 12, top: hoverInfo.y + 12 }}
+        >
+          {hoverInfo.type === "incident" && (
+            <div>
+              <div className="font-bold text-sm text-white mb-1">
+                {hoverInfo.object.title}
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                  style={{
+                    backgroundColor: `rgba(${SEVERITY_COLORS[hoverInfo.object.severity]?.join(",") || "220,38,38"}, 0.3)`,
+                    color: `rgb(${SEVERITY_COLORS[hoverInfo.object.severity]?.join(",") || "220,38,38"})`,
+                  }}
+                >
+                  {hoverInfo.object.severity}
+                </span>
+                <span className="text-slate-300 capitalize">{hoverInfo.object.status}</span>
+              </div>
+              <div className="text-slate-300">
+                Responders:{" "}
+                <span className="font-semibold text-cyan-400">
+                  {hoverInfo.object.responders?.length || 0}
+                </span>
+              </div>
+              {hoverInfo.object.reportCount > 1 && (
+                <div className="mt-1 text-amber-400 font-bold text-[10px]">
+                  ⚠️ {hoverInfo.object.reportCount} Merged Citizen Reports
+                </div>
+              )}
+            </div>
+          )}
+
+          {hoverInfo.type === "person" && (
+            <div>
+              <div className="font-bold text-sm text-white">{hoverInfo.object.name}</div>
+              <div className="text-slate-400 text-[11px] mb-1.5">{hoverInfo.object.role}</div>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{
+                    backgroundColor: `rgb(${STATUS_COLORS[hoverInfo.object.status]?.join(",") || "37,99,235"})`,
+                  }}
+                />
+                <span className="capitalize font-semibold text-slate-200">
+                  {hoverInfo.object.status}
+                </span>
+              </div>
+              {hoverInfo.object.assignedIncident && (
+                <div className="mt-2 text-[10px] text-cyan-300 border-t border-slate-700/60 pt-1">
+                  En route to Incident #{hoverInfo.object.assignedIncident}
+                </div>
+              )}
+            </div>
+          )}
+
+          {hoverInfo.type === "route" && (
+            <div>
+              <div className="font-bold text-xs text-cyan-400 mb-0.5">Active Road Route</div>
+              <div className="text-white font-medium">{hoverInfo.object.responderName} ({hoverInfo.object.role})</div>
+              <div className="text-slate-300 text-[10px] mt-1">
+                Destination: <span className="text-white font-semibold">{hoverInfo.object.incidentTitle}</span>
+              </div>
+            </div>
+          )}
+
+          {hoverInfo.type === "resource" && (
+            <div>
+              <div className="font-bold text-sm text-purple-300">{hoverInfo.object.name}</div>
+              <div className="text-slate-400 text-[11px]">{hoverInfo.object.type}</div>
+              <div className="text-slate-300 capitalize mt-1">Status: {hoverInfo.object.status}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -1,8 +1,7 @@
-"use client"
-
-import { useState, useEffect, useCallback } from "react"
+"use client";
+import { useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
-import { AlertTriangle, BarChart3, MessageSquare, Users, Package, RefreshCw, Cpu, Image as ImageIcon } from "lucide-react"
+import { AlertTriangle, BarChart3, MessageSquare, Users, Package, RefreshCw, Cpu, Image as ImageIcon, Radio, Zap } from "lucide-react"
 import IncidentDetailView from "@/components/incident-detail-view"
 import RightSidebar from "@/components/right-sidebar"
 import CommunicationsPanel from "@/components/communications-panel"
@@ -12,6 +11,14 @@ import { IoTManagement } from "@/components/iot-management"
 import EvidenceGallery from "@/components/evidence-gallery"
 import { incidentsAPI, personnelAPI, resourcesAPI } from "@/lib/api"
 import { useWebSocket } from "@/hooks/use-websocket"
+import { useSimulationStream } from "@/hooks/useSimulationStream"
+import { useAnimationTimer } from "@/hooks/useAnimationTimer"
+import TelemetryCharts from "@/components/simulation/TelemetryCharts"
+import SynergyFeed from "@/components/simulation/SynergyFeed"
+import MapLegend from "@/components/simulation/MapLegend"
+import { Switch } from "@/components/ui/switch"
+import { useRef } from "react"
+import { deriveSimDashboardData } from "@/lib/simulation-adapter"
 
 // Dynamic import for Leaflet map to avoid SSR issues
 const MapComponent = dynamic(() => import("@/components/map-component"), {
@@ -23,7 +30,10 @@ const MapComponent = dynamic(() => import("@/components/map-component"), {
   ),
 })
 
+const DeckGLMap = dynamic(() => import("@/components/simulation/DeckGLMap"), { ssr: false })
+
 export default function CrisisCommandDashboard() {
+  const [isSimulationMode, setIsSimulationMode] = useState(false)
   const [selectedIncident, setSelectedIncident] = useState<any | null>(null)
   const [selectedPersonnel, setSelectedPersonnel] = useState<any | null>(null)
   const [incidents, setIncidents] = useState<any[]>([])
@@ -60,6 +70,71 @@ export default function CrisisCommandDashboard() {
     autoConnect: true,
     onConnect: () => console.log('Dashboard connected to WebSocket'),
   })
+
+  // Simulation Mode Stream & Animation Hooks
+  const { ticksHistory, isConnected: isSimConnected, error: simError } = useSimulationStream(isSimulationMode)
+  const currentTickRef = useRef<number>(0)
+  const maxTick = ticksHistory.length > 0 ? ticksHistory[ticksHistory.length - 1].tick : 0
+  const minTick = ticksHistory.length > 0 ? ticksHistory[0].tick : 0
+  const currentTick = useAnimationTimer(isSimulationMode, 1.0, maxTick, currentTickRef)
+
+  useEffect(() => {
+    if (ticksHistory.length === 1) {
+      currentTickRef.current = minTick
+    }
+  }, [ticksHistory.length, minTick])
+
+  // Derive full simulation dashboard state
+  const latestTickData = useMemo(() => {
+    return ticksHistory.length > 0 ? ticksHistory[ticksHistory.length - 1] : null
+  }, [ticksHistory])
+
+  const simData = useMemo(() => {
+    return deriveSimDashboardData(latestTickData, currentTick, ticksHistory)
+  }, [latestTickData, currentTick, ticksHistory])
+
+  const hydratedLiveIncidents = useMemo(() => {
+    return incidents.map((inc) => {
+      const assignedResponders = personnel
+        .filter((p) => p.assignedIncident === inc.id)
+        .map((p) => p.name)
+      const assignedEquipment = resources
+        .filter((r) => r.assigned_incident_id === inc.id)
+        .map((r) => r.name)
+      return {
+        ...inc,
+        responders: assignedResponders,
+        resources: assignedEquipment,
+        arrivedUnits: assignedResponders.length,
+        totalUnits: Math.max(1, assignedResponders.length + assignedEquipment.length),
+      }
+    })
+  }, [incidents, personnel, resources])
+
+  const displayIncidents = isSimulationMode ? simData.incidents : hydratedLiveIncidents
+  const displayPersonnel = isSimulationMode ? simData.personnel : personnel
+  const displayResources = isSimulationMode ? simData.resources : resources
+
+  const liveActivePersonnel = useMemo(() => {
+    return personnel.filter(
+      (p) => p.status === "responding" || p.status === "on-scene" || p.status === "en-route"
+    ).length
+  }, [personnel])
+
+  const liveDeployedEquipment = useMemo(() => {
+    return resources.filter(
+      (r) => r.status === "deployed" || (r.assigned_incident_id != null && r.assigned_incident_id !== 0)
+    ).length
+  }, [resources])
+
+  const displayStats = isSimulationMode
+    ? simData.stats
+    : {
+        activeIncidents: incidents.length,
+        activePersonnel: liveActivePersonnel,
+        totalEquipment: liveDeployedEquipment,
+        criticalIncidents: incidents.filter((inc) => inc.severity === "critical").length,
+      }
 
   // Memoized fetch function so it can be used in effects safely
   const fetchData = useCallback(async (silent = false) => {
@@ -305,6 +380,11 @@ export default function CrisisCommandDashboard() {
               <AlertTriangle className="w-6 h-6 text-primary" />
               <h1 className="text-xl font-bold text-foreground">ResQnet Command</h1>
             </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className={!isSimulationMode ? "text-cyan-400 font-bold" : "text-muted-foreground"}>Live</span>
+              <Switch checked={isSimulationMode} onCheckedChange={setIsSimulationMode} />
+              <span className={isSimulationMode ? "text-primary font-bold" : "text-muted-foreground"}>Sim</span>
+            </div>
             <button
               onClick={() => fetchData()}
               className="p-2 hover:bg-muted rounded-full transition-colors"
@@ -313,25 +393,25 @@ export default function CrisisCommandDashboard() {
               <RefreshCw className="w-4 h-4 text-muted-foreground" />
             </button>
           </div>
-          <div className="text-sm text-muted-foreground">{incidents.length} Active Incidents</div>
+          <div className="text-sm text-muted-foreground">{displayIncidents.length} Active Incidents</div>
         </div>
 
         {/* Incident List */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
+          {!isSimulationMode && loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-muted-foreground">Loading incidents...</div>
             </div>
-          ) : incidents.length === 0 ? (
+          ) : displayIncidents.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-muted-foreground">
                 <AlertTriangle className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p>No active incidents</p>
+                <p>{isSimulationMode ? "Waiting for simulation tick..." : "No active incidents"}</p>
               </div>
             </div>
           ) : (
             <div className="space-y-2 p-2">
-              {incidents.map((incident) => (
+              {displayIncidents.map((incident) => (
                 <div key={incident.id}>
                   <button
                     onClick={() => handleSelectIncident(incident)}
@@ -345,7 +425,7 @@ export default function CrisisCommandDashboard() {
                         {incident.title}
                       </h3>
                       <span
-                        className={`text-xs px-2 py-1 rounded ${incident.severity === "critical"
+                        className={`text-xs px-2 py-1 rounded font-bold ${incident.severity === "critical"
                           ? "bg-primary/20 text-primary"
                           : incident.severity === "high"
                             ? "bg-orange-500/20 text-orange-600 dark:text-orange-400"
@@ -369,6 +449,17 @@ export default function CrisisCommandDashboard() {
                           </span>
                         )}
                       </div>
+                      
+                      {/* Requirements summary for simulated incidents */}
+                      {incident.requirements && Object.keys(incident.requirements).length > 0 && (
+                        <div className="mt-2 pt-1 border-t border-border/40 flex flex-wrap gap-1">
+                          {Object.entries(incident.requirements).map(([type, count]) => (
+                            <span key={type} className="text-[10px] px-1.5 py-0.5 rounded bg-muted/70 text-muted-foreground font-mono">
+                              {type}: {incident.remaining_requirements?.[type] ?? count}/{count as number}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </button>
 
@@ -395,24 +486,24 @@ export default function CrisisCommandDashboard() {
           <div className="grid grid-cols-4 gap-4">
             <div className="bg-muted/50 rounded-lg p-3">
               <div className="text-sm text-muted-foreground">Active Incidents</div>
-              <div className="text-2xl font-bold text-foreground">{incidents.length}</div>
+              <div className="text-2xl font-bold text-foreground">{displayStats.activeIncidents}</div>
             </div>
             <div className="bg-muted/50 rounded-lg p-3">
               <div className="text-sm text-muted-foreground">Active Personnel</div>
               <div className="text-2xl font-bold text-accent">
-                {activePersonnel}
+                {displayStats.activePersonnel}
               </div>
             </div>
             <div className="bg-muted/50 rounded-lg p-3">
               <div className="text-sm text-muted-foreground">Equipment Deployed</div>
               <div className="text-2xl font-bold text-accent">
-                {totalEquipment}
+                {displayStats.totalEquipment}
               </div>
             </div>
             <div className="bg-muted/50 rounded-lg p-3">
               <div className="text-sm text-muted-foreground">Critical Incidents</div>
               <div className="text-2xl font-bold text-primary">
-                {incidents.filter((inc) => inc.severity === "critical").length}
+                {displayStats.criticalIncidents}
               </div>
             </div>
           </div>
@@ -420,27 +511,48 @@ export default function CrisisCommandDashboard() {
 
         {/* Map */}
         <div className="flex-1 overflow-hidden p-4">
-          <div className="w-full h-full rounded-lg overflow-hidden border border-border bg-muted">
-            {loading ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-muted-foreground">Loading map data...</div>
+          <div className="w-full h-full rounded-lg overflow-hidden border border-border bg-muted relative">
+            {!isSimulationMode && (
+              loading ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="text-muted-foreground">Loading map data...</div>
+                </div>
+              ) : (
+                <MapComponent
+                  incidents={displayIncidents}
+                  selectedIncident={selectedIncident}
+                  selectedPersonnel={selectedPersonnel}
+                  personnel={displayPersonnel}
+                  resources={displayResources}
+                  isLocationPickerActive={isLocationPickerActive}
+                  onMapClick={handleMapClick}
+                />
+              )
+            )}
+            
+            {isSimulationMode && (
+              <div className="w-full h-full bg-slate-950 absolute inset-0">
+                <DeckGLMap 
+                  currentTickTime={currentTick} 
+                  ticksHistory={ticksHistory} 
+                />
+                <SynergyFeed 
+                  ticksHistory={ticksHistory} 
+                  currentTick={currentTick} 
+                />
+                <MapLegend />
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-md rounded-full px-6 py-2 border border-slate-700 shadow-2xl flex items-center gap-4 z-50 text-white font-mono text-sm tracking-widest">
+                  <span className="text-cyan-400 font-bold">LIVE STREAM</span>
+                  <span className="text-slate-400">|</span>
+                  <span>TICK {currentTick.toFixed(1)}</span>
+                </div>
               </div>
-            ) : (
-              <MapComponent
-                incidents={incidents}
-                selectedIncident={selectedIncident}
-                selectedPersonnel={selectedPersonnel}
-                personnel={personnel}
-                resources={resources}
-                isLocationPickerActive={isLocationPickerActive}
-                onMapClick={handleMapClick}
-              />
             )}
           </div>
         </div>
       </div>
 
-      {/* Right Sidebar - Tabbed (Stats / Communications / Team) */}
+      {/* Right Sidebar - Tabbed (Stats / Communications / Team / Resources / IoT) */}
       <div className="w-96 bg-card border-l border-border flex flex-col overflow-hidden">
         {/* Tab Headers */}
         <div className="flex border-b border-border">
@@ -509,15 +621,53 @@ export default function CrisisCommandDashboard() {
         {/* Tab Content */}
         <div className="flex-1 overflow-hidden">
           {rightSidebarView === 'comms' ? (
-            <CommunicationsPanel />
+            isSimulationMode ? (
+              <div className="h-full flex flex-col p-3 overflow-y-auto space-y-2 bg-slate-950/40">
+                <div className="flex items-center gap-2 text-xs font-mono font-bold text-cyan-400 pb-2 border-b border-border">
+                  <Radio className="w-4 h-4 animate-pulse text-cyan-400" />
+                  <span>AI DISPATCH & SYNERGY RADIO LOGS</span>
+                </div>
+                {simData.communications.length === 0 ? (
+                  <div className="text-center py-10 text-xs text-muted-foreground">
+                    Awaiting AI tactical dispatches...
+                  </div>
+                ) : (
+                  simData.communications.map((comm) => (
+                    <div key={comm.id} className="p-2.5 rounded-xl border border-border/60 bg-card/60 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-foreground flex items-center gap-1">
+                          {comm.type === "synergy" && <Zap className="w-3 h-3 text-amber-400 inline" />}
+                          {comm.sender_name}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{comm.created_at}</span>
+                      </div>
+                      <p className="text-muted-foreground leading-relaxed">{comm.message}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <CommunicationsPanel />
+            )
           ) : rightSidebarView === 'stats' ? (
-            <RightSidebar incidents={allIncidents} />
+            isSimulationMode ? (
+              <TelemetryCharts 
+                ticksHistory={ticksHistory} 
+                currentTick={currentTick} 
+              />
+            ) : (
+              <RightSidebar incidents={displayIncidents} />
+            )
           ) : rightSidebarView === 'team' ? (
-            <PersonnelManagement onSelectPersonnel={handleSelectPersonnel} selectedPersonnelId={selectedPersonnel?.id} />
+            <PersonnelManagement 
+              onSelectPersonnel={handleSelectPersonnel} 
+              selectedPersonnelId={selectedPersonnel?.id} 
+              customPersonnel={displayPersonnel}
+            />
           ) : rightSidebarView === 'resources' ? (
             <ResourceManagement 
-              incidents={incidents} 
-              resources={resources}
+              incidents={displayIncidents} 
+              resources={displayResources}
               pickedLocation={pickedLocation}
               onActivatePicker={handleActivateLocationPicker}
             />

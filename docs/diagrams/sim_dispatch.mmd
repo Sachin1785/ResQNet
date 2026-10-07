@@ -1,0 +1,14 @@
+flowchart TD
+    T0["tick()"] --> T1["Release units whose busy_until <= time<br/>free hub slot, mark completed"]
+    T1 --> T2["Resolve incidents whose requirements are all completed"]
+    T2 --> T3{"Random edge severed?"}
+    T3 -- Yes --> T4["Intercept en-route units on that edge<br/>-> REROUTING"]
+    T3 -- No --> T5
+    T4 --> T5["Maybe spawn incident"]
+    T5 --> T6["Idle/rerouting units, active incidents"]
+    T6 --> T7["Build EvolvingDisasterGraph, GCN embeddings"]
+    T7 --> T8["TransformerActor -> preference matrix"]
+    T8 --> T9["Hungarian assignment"]
+    T9 --> T10{"Incident needs unit type & hub has capacity?"}
+    T10 -- No --> T11["Skip, unit stays idle"]
+    T10 -- Yes --> T12["dispatch_unit, networkx Dijkstra route, trajectory"]

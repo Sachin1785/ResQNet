@@ -13,22 +13,53 @@ class HighLevelPlanner:
         costs: (num_regions, num_regions) transit delay/cost matrix
         """
         n = self.num_regions
-        c = costs.flatten()
         
-        A_ub = np.zeros((n, n * n))
-        for i in range(n):
-            A_ub[i, i*n:(i+1)*n] = 1
-        b_ub = supplies
+        total_supply = np.sum(supplies)
+        total_demand = np.sum(demands)
         
-        A_eq = np.zeros((n, n * n))
-        for j in range(n):
-            A_eq[j, j::n] = 1
-        b_eq = demands
+        if total_demand == 0 and total_supply == 0:
+            return np.zeros((n, n))
+            
+        # Augmented with dummy node for imbalance
+        aug_n = n + 1
         
-        bounds = [(0, None)] * (n * n)
+        aug_supplies = np.zeros(aug_n)
+        aug_supplies[:n] = supplies
+        aug_supplies[n] = max(0, total_demand - total_supply)
         
-        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+        aug_demands = np.zeros(aug_n)
+        aug_demands[:n] = demands
+        aug_demands[n] = max(0, total_supply - total_demand)
+        
+        aug_costs = np.zeros((aug_n, aug_n))
+        aug_costs[:n, :n] = costs
+        aug_costs[n, :n] = 99999.0 # High penalty for dummy supply (unmet demand)
+        aug_costs[:n, n] = 0.0     # Zero penalty for sending surplus to dummy demand
+        
+        c = aug_costs.flatten()
+        
+        A_eq = np.zeros((2 * aug_n, aug_n * aug_n))
+        b_eq = np.zeros(2 * aug_n)
+        
+        # Supply constraints: sum of flow out of i == aug_supplies[i]
+        for i in range(aug_n):
+            A_eq[i, i*aug_n:(i+1)*aug_n] = 1
+            b_eq[i] = aug_supplies[i]
+            
+        # Demand constraints: sum of flow into j == aug_demands[j]
+        for j in range(aug_n):
+            A_eq[aug_n + j, j::aug_n] = 1
+            b_eq[aug_n + j] = aug_demands[j]
+            
+        # Remove one redundant equation to avoid singularity warning (standard in network flow)
+        A_eq = A_eq[:-1]
+        b_eq = b_eq[:-1]
+        
+        bounds = [(0, None)] * (aug_n * aug_n)
+        
+        res = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
         if res.success:
-            return res.x.reshape((n, n))
+            flow_matrix = res.x.reshape((aug_n, aug_n))
+            return flow_matrix[:n, :n]
         else:
             return np.zeros((n, n))

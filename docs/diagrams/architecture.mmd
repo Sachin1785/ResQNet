@@ -1,0 +1,52 @@
+flowchart TB
+    subgraph Channels["Incident Ingestion Channels"]
+        SMS["SMS Gateway<br/>Twilio webhook + Nominatim geocoding"]
+        MESH["Bluetooth SOS Mesh<br/>500 m duplicate merge"]
+        IOT["IoT Sensors<br/>ESP32 -> Raspberry Pi -> /api/iot/stream"]
+        VOICE["Voice Emergency Bot<br/>Gemini + ElevenLabs"]
+        PWA["Field Responder PWA<br/>GPS pulse, reports, photos"]
+    end
+
+    subgraph Core["Core Platform (Flask + Socket.IO :5000)"]
+        API["REST Blueprints /api/*"]
+        WS["Socket.IO real-time hub"]
+        DB[("SQLite WAL<br/>crisis_management.db<br/>iot_sensors.db")]
+    end
+
+    subgraph Workers["Background Services"]
+        CEL["Celery Verification Worker<br/>filesystem broker"]
+        DISP["AI Dispatch Daemon<br/>score matrix + Hungarian MWM + GNN"]
+    end
+
+    subgraph AIExt["External AI"]
+        GEM["Gemini Flash Vision"]
+    end
+
+    subgraph Sim["Simulation Stack"]
+        LIB["resqnet-module2<br/>SimulationEngine + models"]
+        FAPI["FastAPI WebSocket :8000"]
+        OSM["OSMnx road graph<br/>Bandra, Mumbai"]
+    end
+
+    subgraph UI["Command Dashboard (Next.js)"]
+        LIVE["Live Operations Map<br/>deck.gl + OSRM road snapping"]
+        SIMUI["Simulation Mode<br/>incidents, team, resources, stats"]
+    end
+
+    SMS --> API
+    MESH --> API
+    IOT --> API
+    VOICE --> API
+    PWA --> API
+    PWA <--> WS
+    API <--> DB
+    API --> CEL
+    CEL --> GEM
+    CEL --> DB
+    DISP <--> DB
+    API <--> WS
+    WS <--> LIVE
+    LIB --> FAPI
+    OSM --> LIB
+    FAPI --> SIMUI
+    LIVE --- SIMUI

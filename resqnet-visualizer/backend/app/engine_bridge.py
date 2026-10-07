@@ -4,15 +4,19 @@ import random
 import torch
 import uuid
 import networkx as nx
+from pathlib import Path
 
 # Bridge to existing module
-sys.path.insert(0, os.path.abspath(r"D:\Codeathon\resqnet-module2"))
+MODULE2_PATH = str(Path(__file__).resolve().parents[3] / "resqnet-module2")
+if MODULE2_PATH not in sys.path:
+    sys.path.insert(0, MODULE2_PATH)
 
 from resqnet.inner_loop.routing_bridge import RoutingBridge
-from resqnet.models.evolve_gcn import EvolvingGCNConv
-from resqnet.models.transformer_actor import TransformerActor
-from resqnet.middle_loop.llp_agent import LowLevelPlanner
-from resqnet.core.graph import EvolvingDisasterGraph
+from resqnet.inference.neural_scorer import NeuralScorer
+from resqnet.core.dispatch_rounds import solve_rounds
+from resqnet.core.features import role_to_agency, INCIDENT_TYPES, DB_TYPE_TO_CANON, DB_SEVERITY_NORM
+from resqnet.core.synergy import synergy_from_count
+from resqnet.core.scoring import analytic_pair_score
 from resqnet.env.simulation_engine import SimulationEngine
 from resqnet.core.types import StationaryResource, MobileResource, DemandZone, get_incident_requirements
 from resqnet.evaluation.reasoning import DispatchExplainer
@@ -31,7 +35,9 @@ class EngineBridge:
         
         self.setup_environment()
         
-        self.gcn = EvolvingGCNConv(in_channels=3, out_channels=16, heads=2)
+        weights_dir = os.path.join(MODULE2_PATH, "weights")
+        self.neural = NeuralScorer.try_load(weights_dir, domain="road")
+        
         self.explainer = DispatchExplainer()
         
     def setup_environment(self):
@@ -118,82 +124,121 @@ class EngineBridge:
             "hospital_load": hosp_cap,
             "fire_station_load": fire_cap,
             "police_station_load": pol_cap,
-            "active_incidents_count": len(active_incs)
+            "active_incidents_count": len(active_incs),
+            "neural_enabled": self.neural is not None
         }
         
         dispatches = []
         if idle_units and active_incs:
-            d_graph = EvolvingDisasterGraph()
-            for node in self.nodes: d_graph.add_demand_zone(str(node), torch.tensor([0.0, random.random()]))
-            for u, v, k, data in self.graph.edges(keys=True, data=True):
-                d_graph.set_edge_status(str(u), str(v), True, data.get('length', 1.0))
-                
-            pyg_data = d_graph.to_pyg_data()
-            pyg_data.x = pyg_data.x.to(torch.float32)
-            if pyg_data.edge_attr is not None:
-                pyg_data.edge_attr = pyg_data.edge_attr.to(torch.float32)
-            
-            node_embeddings = self.gcn(pyg_data.x, pyg_data.edge_index, pyg_data.edge_attr)
-            
-            responder_indices = [d_graph.node_id_to_idx[u.current_location] for u in idle_units]
-            responder_states = node_embeddings[responder_indices]
-            
-            actor = TransformerActor(state_dim=16, num_depots=len(active_incs), hidden_dim=32)
-            with torch.no_grad():
-                preferences_tensor = actor(responder_states.unsqueeze(0))
-            preferences = preferences_tensor.squeeze(0).numpy()
-            
-            planner = LowLevelPlanner(num_depots=len(active_incs))
-            assignments = planner.solve_mwm(preferences)
-            
-            incident_to_assignments = {}
-            for resp_idx, dem_idx in assignments:
-                inc = active_incs[dem_idx]
-                if inc.id not in incident_to_assignments:
-                    incident_to_assignments[inc.id] = []
-                incident_to_assignments[inc.id].append(resp_idx)
-                
-            for inc_id, assigned_resp_indices in incident_to_assignments.items():
-                inc = self.engine.incidents[inc_id]
-                
-                matched_types = {}
-                for r_idx in assigned_resp_indices:
-                    u_type = idle_units[r_idx].type
-                    matched_types[u_type] = matched_types.get(u_type, 0) + 1
-                    
+            # Map simulation types to daemon expected types
+            unassigned = []
+            for inc in active_incs:
+                t = {'Fire':'fire','Car Crash':'accident','Earthquake':'natural_disaster'}.get(inc.type, 'other')
+                sev = {5:'critical',4:'high',3:'medium',2:'low',1:'low'}.get(inc.severity, 'medium')
                 rem = inc.remaining_requirements
-                needs_multiple = sum(1 for v in rem.values() if v > 0) > 1
-                has_multiple = len(matched_types.keys()) > 1
-                is_synergy = needs_multiple and has_multiple
+                # Convert requirements to assigned_agencies (inverse approximation for slots)
+                agencies_present = []
+                orig = inc.requirements
+                for r_type, c in orig.items():
+                    agency = 0 if 'Police' in r_type else (1 if 'Fire' in r_type else 2)
+                    assigned = c - rem.get(r_type, 0)
+                    agencies_present.extend([agency]*assigned)
                 
-                for resp_idx in assigned_resp_indices:
-                    unit = idle_units[resp_idx]
-                    needed = inc.remaining_requirements.get(unit.type, 0)
+                unassigned.append({
+                    "id": inc.id,
+                    "type": t,
+                    "severity": sev,
+                    "assigned_agencies": agencies_present,
+                    "sim_inc": inc,
+                    "node": inc.location
+                })
+                
+            available = []
+            for u in idle_units:
+                role = 'Police Officer' if 'Police' in u.type else ('Fire Fighter' if 'Fire' in u.type else 'Paramedic')
+                agency = 0 if 'Police' in u.type else (1 if 'Fire' in u.type else 2)
+                available.append({
+                    "id": u.id,
+                    "role": role,
+                    "agency": agency,
+                    "sim_unit": u,
+                    "node": u.current_location
+                })
+
+            # Calculate actual road distance
+            # Cache shortest path lengths from each incident node
+            for inc in unassigned:
+                try:
+                    lengths = nx.single_source_dijkstra_path_length(self.graph, int(inc["node"]), weight="length")
+                    inc["_lengths"] = lengths
+                except Exception:
+                    inc["_lengths"] = {}
+
+            def score_fn(person, incident, present_agencies):
+                d_m = incident.get("_lengths", {}).get(int(person["node"]), 5000.0)
+                d_km = d_m / 1000.0
+                person["_d_km"] = person.get("_d_km", {})
+                person["_d_km"][incident["id"]] = d_km
+                
+                s = analytic_pair_score(d_km, person['role'], incident['type'], incident['severity'])
+                
+                # Hard feasibility check matching sim logic
+                sim_inc = incident["sim_inc"]
+                sim_u = person["sim_unit"]
+                if sim_inc.remaining_requirements.get(sim_u.type, 0) <= 0:
+                    s = 0.0
+                
+                return s
+
+            matches = solve_rounds(unassigned, available, score_fn, neural_scorer=self.neural, gcn_embeddings=None)
+            
+            # Map matches to dispatch assignments
+            for match in matches:
+                person = match["personnel"]
+                incident = match["incident"]
+                rnd = match["round"]
+                synergy_marginal = match["marginal_synergy"]
+                
+                unit = person["sim_unit"]
+                inc = incident["sim_inc"]
+                
+                # Check synergistic effect for UI
+                agencies_present = incident.get("assigned_agencies", [])
+                agencies_present.append(person["agency"])
+                n_distinct = len(set(agencies_present))
+                s_tier = min(3, n_distinct)
+                synergy_bundle = s_tier >= 2
+                s_mult = synergy_from_count(n_distinct)
+                
+                try:
+                    route = nx.shortest_path(self.graph, int(unit.current_location), int(inc.location), weight='length')
+                    dist = nx.shortest_path_length(self.graph, int(unit.current_location), int(inc.location), weight='length')
+                    route = [str(n) for n in route]
+                except:
+                    route = [unit.current_location, inc.location]
+                    dist = 5000.0
                     
-                    if needed > 0:
-                        dist = float(torch.norm(responder_states[resp_idx] - node_embeddings[d_graph.node_id_to_idx[inc.location]]).detach()) * 100
-                        
-                        try:
-                            route = nx.shortest_path(self.graph, int(unit.current_location), int(inc.location))
-                            route = [str(n) for n in route]
-                        except:
-                            route = [unit.current_location, inc.location]
-                        
-                        success = self.engine.dispatch_unit(unit.id, inc.id, distance=dist, route=route)
-                        if success:
-                            infra = self.engine.infrastructure[unit.assigned_infra_id] if unit.assigned_infra_id else None
-                            reason = self.explainer.explain(unit, inc, dist, infra)
-                            
-                            calc_duration = unit.busy_until - self.engine.time
-                            trajectory = self.geo_router.generate_trajectory(route, tick, calc_duration)
-                            
-                            dispatches.append({
-                                "unit_id": unit.id, "unit_type": unit.type,
-                                "incident_id": inc.id, "incident_type": inc.type,
-                                "distance": dist, "calculated_duration_ticks": calc_duration,
-                                "synergy_bundle": is_synergy, "reasoning": reason, "status": "SUCCESS",
-                                "path": trajectory
-                            })
+                success = self.engine.dispatch_unit(unit.id, inc.id, distance=dist, route=route)
+                if success:
+                    infra = self.engine.infrastructure[unit.assigned_infra_id] if unit.assigned_infra_id else None
+                    reason = self.explainer.explain(unit, inc, dist, infra)
+                    if s_tier > 1:
+                        reason += f" Synergy tier {s_tier} (x{s_mult:.2f})."
+                    
+                    calc_duration = unit.busy_until - self.engine.time
+                    trajectory = self.geo_router.generate_trajectory(route, tick, calc_duration)
+                    
+                    dispatches.append({
+                        "unit_id": unit.id, "unit_type": unit.type,
+                        "incident_id": inc.id, "incident_type": inc.type,
+                        "distance": dist, "calculated_duration_ticks": calc_duration,
+                        "synergy_bundle": synergy_bundle, 
+                        "synergy_tier": s_tier,
+                        "synergy_multiplier": s_mult,
+                        "neural_term": match["neural_term"],
+                        "reasoning": reason, "status": "SUCCESS",
+                        "path": trajectory
+                    })
                             
         return {
             "tick": tick,

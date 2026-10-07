@@ -147,7 +147,12 @@ class SimulationEngine:
             unit.route = route
             
             # PHYSICS-BASED TRAVEL
-            avg_speed_m_per_tick = 3.0 # example
+            speeds = {
+                'Ambulance': 14.0,
+                'Fire Truck': 11.0,
+                'Police Car': 16.5
+            }
+            avg_speed_m_per_tick = speeds.get(unit.type, 14.0)
             travel_ticks = math.ceil(distance / avg_speed_m_per_tick)
             on_scene_ticks = 2
             unit.busy_until = self.time + travel_ticks + on_scene_ticks

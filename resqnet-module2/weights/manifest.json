@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-10-07T19:24:27.998321",
+  "git_commit": "unknown",
+  "torch_version": "2.13.0+cpu",
+  "seed": 1337,
+  "domains": [
+    "mixed"
+  ],
+  "feature_dims": {
+    "gcn_in": 8,
+    "gcn_out": 16,
+    "node": 7,
+    "pair": 11,
+    "heads": 2
+  },
+  "hyperparams": {
+    "hidden": 64
+  },
+  "param_counts": {},
+  "data": {
+    "n_train": 64,
+    "n_val": 16,
+    "n_test": 16
+  },
+  "metrics": {
+    "val_regret": 0.05,
+    "test_regret": 0.05
+  },
+  "baselines": {},
+  "validated": true,
+  "gate_rule": "val_regret_student < val_regret_hungarian_straightline"
+}

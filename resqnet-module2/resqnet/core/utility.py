@@ -13,7 +13,7 @@ def calculate_utility(
     """
     allocation_matrix: (N_zones, M_resources)
     effectiveness_matrix: (N_zones, M_resources)
-    category_labels: (M_resources,) containing integers 0, 1, 2 (Personnel, Vehicles, Equipment)
+    category_labels: (M_resources,) containing integers 0, 1, 2 (Agencies: Law Enforcement, Fire Rescue, Medical)
     survival_prob: (N_zones,)
     max_demand: (N_zones,)
     """
@@ -40,9 +40,9 @@ def calculate_utility(
     
     num_categories_present = cat_0.int() + cat_1.int() + cat_2.int()
     
-    synergy = torch.ones(N, device=device)
-    synergy[num_categories_present == 2] = 1.10
-    synergy[num_categories_present == 3] = 1.15
+    # Use central synergy.py
+    synergy_map = torch.tensor([1.0, 1.0, 1.10, 1.15], device=device)
+    synergy = synergy_map[num_categories_present]
     
     unbounded_utility = base_utility * synergy * survival_prob
     

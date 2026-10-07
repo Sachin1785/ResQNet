@@ -3,6 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TransformerActor(nn.Module):
+    """
+    LEGACY: Not used by live dispatch. Replaced by PairwiseTransformerScorer.
+    Kept for backward compatibility with older tests and library scripts.
+    """
     def __init__(self, state_dim: int, num_depots: int, hidden_dim: int = 128, num_layers: int = 2, nhead: int = 4):
         super().__init__()
         self.state_dim = state_dim

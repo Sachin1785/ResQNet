@@ -13,12 +13,25 @@ class EvolvingGCNConv(MessagePassing):
         self.weight_lstm = nn.LSTMCell(in_channels * out_channels, in_channels * out_channels)
         
         # Initial flattened weight
-        self.register_buffer("weight_flat", torch.randn(in_channels * out_channels) / (in_channels**0.5))
+        self.weight_init = nn.Parameter(torch.randn(in_channels * out_channels) / (in_channels**0.5))
+        self.register_buffer("weight_flat", self.weight_init.clone())
         self.register_buffer("hx", torch.zeros(1, in_channels * out_channels))
         self.register_buffer("cx", torch.zeros(1, in_channels * out_channels))
         
         # Using GATConv for the attention part
         self.gat = GATConv(out_channels, out_channels // heads, heads=heads, concat=True, edge_dim=1)
+
+    def reset_state(self):
+        """Episode boundary: restore W0 and zero LSTM state."""
+        self.weight_flat = self.weight_init.clone()
+        self.hx = torch.zeros_like(self.hx)
+        self.cx = torch.zeros_like(self.cx)
+
+    def detach_state(self):
+        """Truncated BPTT / inference: cut autograd history, keep numeric state."""
+        self.weight_flat = self.weight_flat.detach()
+        self.hx = self.hx.detach()
+        self.cx = self.cx.detach()
 
     def evolve_weights(self):
         input_w = self.weight_flat.unsqueeze(0)

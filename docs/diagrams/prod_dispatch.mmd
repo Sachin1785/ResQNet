@@ -1,0 +1,13 @@
+flowchart TD
+    A["Poll every 3 s"] --> B["Query active incidents with 0 assigned personnel<br/>ORDER BY severity, created_at"]
+    B --> C{"Any incidents?"}
+    C -- No --> A
+    C -- Yes --> D["Query available personnel<br/>status = available, unassigned"]
+    D --> E{"Any personnel?"}
+    E -- No --> A
+    E -- Yes --> F["For each pair (p, i) compute<br/>S = 0.4*dist + 0.4*role + 0.2*sev"]
+    F --> G["Evaluate Utility & Fairness"]
+    G --> H["Apply Synergy Multiplier"]
+    H --> I["Maximum-weight matching<br/>Hungarian on cost = -S"]
+    I --> J["BEGIN IMMEDIATE<br/>assign responder, write audit entry"]
+    J --> A

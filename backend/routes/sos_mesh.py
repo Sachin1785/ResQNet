@@ -213,6 +213,195 @@ def receive_sos_mesh():
     }), 201
 
 
+@sos_mesh_bp.route('/sosmesh/batch', methods=['POST'])
+def receive_sos_mesh_batch():
+    """
+    Receive a batch of SOS messages from Bluetooth mesh network.
+    
+    Expected JSON structure:
+    {
+        "messages": [
+            {
+                "msg_id": "89d19edd-...",
+                "type": "SOS",
+                "name": "John Doe",
+                ...
+            },
+            ...
+        ]
+    }
+    """
+    data = request.get_json()
+    if not data or 'messages' not in data or not isinstance(data['messages'], list):
+        return jsonify({
+            'success': False,
+            'error': 'Missing or invalid "messages" array'
+        }), 400
+        
+    messages = data['messages']
+    receipts = []
+    
+    # Process each message individually. Since we already have logic for /sosmesh, 
+    # we can adapt it or call it. We will adapt it inline for simplicity and efficiency.
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    for msg in messages:
+        # Validate required fields
+        required_fields = ['msg_id', 'name', 'latitude', 'longitude', 'emergency', 'timestamp']
+        if not all(field in msg for field in required_fields):
+            continue
+            
+        msg_id = msg['msg_id']
+        
+        # Map emergency type
+        emergency_type = msg.get('emergency', 'Unknown Emergency')
+        incident_type_map = {
+            'Medical Emergency': ('medical', 'critical'),
+            'Fire': ('fire', 'critical'),
+            'Accident': ('accident', 'high'),
+            'Crime': ('security', 'high'),
+            'Natural Disaster': ('natural_disaster', 'critical'),
+            'Other': ('other', 'medium')
+        }
+        incident_type, severity = incident_type_map.get(emergency_type, ('other', 'high'))
+        
+        # Check for existing active incidents at similar location
+        cursor.execute('''
+            SELECT id, lat, lng, report_count, sosmesh_messages FROM incidents 
+            WHERE type = ? AND status = 'active'
+        ''', (incident_type,))
+        
+        active_incidents = [dict(row) for row in cursor.fetchall()]
+        
+        duplicate_incident = None
+        for incident in active_incidents:
+            distance = calculate_distance(
+                msg['latitude'], msg['longitude'],
+                incident['lat'], incident['lng']
+            )
+            if distance <= 500:  # 500 meters threshold
+                duplicate_incident = incident
+                break
+                
+        if duplicate_incident:
+            # Parse existing messages
+            existing_messages = []
+            if duplicate_incident['sosmesh_messages']:
+                try:
+                    existing_messages = json.loads(duplicate_incident['sosmesh_messages'])
+                except json.JSONDecodeError:
+                    existing_messages = []
+            
+            # Deduplication
+            if any(m.get('msg_id') == msg_id for m in existing_messages):
+                receipts.append(msg_id)
+                continue
+                
+            new_count = (duplicate_incident['report_count'] or 1) + 1
+            existing_messages.append({
+                'msg_id': msg_id,
+                'name': msg['name'],
+                'latitude': msg['latitude'],
+                'longitude': msg['longitude'],
+                'emergency': msg['emergency'],
+                'timestamp': msg['timestamp'],
+                'delivered': msg.get('delivered', False),
+                'received_at': datetime.now().isoformat()
+            })
+            
+            cursor.execute('''
+                UPDATE incidents 
+                SET report_count = ?, 
+                    sosmesh_messages = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (new_count, json.dumps(existing_messages), duplicate_incident['id']))
+            
+            cursor.execute('''
+                INSERT INTO incident_timeline (incident_id, event_type, description, user_name)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                duplicate_incident['id'], 
+                'sosmesh_report', 
+                f'SOS Mesh report from {msg["name"]} - {msg["emergency"]}. Total reports: {new_count}', 
+                'SOS Mesh'
+            ))
+            
+            receipts.append(msg_id)
+            print(f"🚨 RECEIVED SOS MESH (BATCH MERGED): {msg['name']} - {msg['emergency']}")
+            
+        else:
+            # Create new incident
+            title = f"SOS: {msg['emergency']} - {msg['name']}"
+            description = f"Emergency reported via SOS Bluetooth Mesh Network.\n\nReporter: {msg['name']}\nEmergency Type: {msg['emergency']}\nMessage ID: {msg_id}"
+            
+            initial_message = [{
+                'msg_id': msg_id,
+                'name': msg['name'],
+                'latitude': msg['latitude'],
+                'longitude': msg['longitude'],
+                'emergency': msg['emergency'],
+                'timestamp': msg['timestamp'],
+                'delivered': msg.get('delivered', False),
+                'received_at': datetime.now().isoformat()
+            }]
+            
+            cursor.execute('''
+                INSERT INTO incidents (
+                    title, description, type, severity, status,
+                    lat, lng, location_name, report_source, report_count, sosmesh_messages
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                title,
+                description,
+                incident_type,
+                severity,
+                'active',
+                msg['latitude'],
+                msg['longitude'],
+                f"SOS Mesh Location ({msg['latitude']:.4f}, {msg['longitude']:.4f})",
+                'sosmesh',
+                1,
+                json.dumps(initial_message)
+            ))
+            
+            incident_id = cursor.lastrowid
+            
+            cursor.execute('''
+                INSERT INTO incident_timeline (incident_id, event_type, description, user_name)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                incident_id, 
+                'incident_created', 
+                f'Incident created from SOS Mesh: {msg["emergency"]} reported by {msg["name"]}', 
+                'SOS Mesh'
+            ))
+            
+            try:
+                broadcast_incident_notification(
+                    incident_id,
+                    f"🚨 SOS MESH ALERT: {severity.upper()}",
+                    f"{msg['emergency']} - {msg['name']}",
+                    'critical' if severity == 'critical' else 'high'
+                )
+            except Exception as e:
+                print(f"Error broadcasting notification: {e}")
+                
+            receipts.append(msg_id)
+            print(f"🚨 RECEIVED SOS MESH (BATCH CREATED): {msg['name']} - {msg['emergency']}")
+            
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'receipts': receipts,
+        'processed_count': len(receipts)
+    }), 200
+
+
 @sos_mesh_bp.route('/sosmesh/messages', methods=['GET'])
 def get_all_sosmesh_messages():
     """Get all SOS mesh messages from all incidents"""

@@ -1,7 +1,14 @@
 "use client"
 
-import { Users, Truck, Radio, MessageSquare, Wifi, Smartphone, CheckCircle, AlertCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Users, Truck, Radio, MessageSquare, Wifi, Smartphone, CheckCircle, AlertCircle, Image as ImageIcon, X, ZoomIn, Loader2 } from "lucide-react"
 import { incidentsAPI } from "@/lib/api"
+
+const SERVER_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace(/\/api$/, '')
+function getImageUrl(filepath: string) {
+  if (filepath.startsWith('http')) return filepath
+  return `${SERVER_BASE}/${filepath}`
+}
 
 interface IncidentDetailViewProps {
   incident: {
@@ -27,6 +34,22 @@ interface IncidentDetailViewProps {
 }
 
 export default function IncidentDetailView({ incident, onConfirmResolution }: IncidentDetailViewProps) {
+  const [attachments, setAttachments] = useState<any[]>([])
+  const [loadingAttachments, setLoadingAttachments] = useState(true)
+  const [lightboxImg, setLightboxImg] = useState<any | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoadingAttachments(true)
+    setAttachments([])
+    incidentsAPI.getAttachments(incident.id)
+      .then((res: any) => { if (!cancelled && res.success) setAttachments(res.attachments) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingAttachments(false) })
+    return () => { cancelled = true }
+  }, [incident.id])
+
+  const imageAttachments = attachments.filter((a: any) => a.file_type === 'image')
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "critical":
@@ -166,30 +189,38 @@ export default function IncidentDetailView({ incident, onConfirmResolution }: In
         </div>
       )}
 
-      {/* Attachments / Evidence */}
-      {incident.attachments && incident.attachments.length > 0 && (
-        <div className="mb-3">
-          <h4 className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Evidence</h4>
-          <div className="grid grid-cols-2 gap-2">
-            {incident.attachments.map((file: any, idx: number) => {
-              // Construct URL: strip /api from end of base URL and join with filepath
-              // If filepath already starts with http, use it as is
-              const serverUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace(/\/api$/, '');
-              const fileUrl = file.filepath.startsWith('http') ? file.filepath : `${serverUrl}/${file.filepath}`;
-
-              return (
-                <a key={idx} href={fileUrl} target="_blank" rel="noopener noreferrer" className="block relative aspect-video bg-muted rounded overflow-hidden border border-border">
-                  {file.file_type.startsWith('image') ? (
-                    <img src={fileUrl} alt={file.filename} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-xs text-muted-foreground">{file.filename}</div>
-                  )}
-                </a>
-              );
-            })}
+      {/* ── FIELD EVIDENCE PHOTOS ── */}
+      <div>
+        <h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide flex items-center gap-1.5">
+          <ImageIcon className="w-3 h-3" />
+          Field Evidence
+          {!loadingAttachments && (
+            <span className="ml-1 text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{imageAttachments.length}</span>
+          )}
+        </h4>
+        {loadingAttachments ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+            <Loader2 className="w-3 h-3 animate-spin" />Loading evidence...
           </div>
-        </div>
-      )}
+        ) : imageAttachments.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground italic py-1 pl-1">No photos submitted yet.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-1.5">
+            {imageAttachments.map((att: any, idx: number) => (
+              <button
+                key={att.id ?? idx}
+                onClick={() => setLightboxImg(att)}
+                className="group relative aspect-square rounded-lg overflow-hidden border border-border/50 bg-muted hover:border-primary/60 transition-all duration-200 hover:scale-[1.04] active:scale-95 shadow-sm"
+              >
+                <img src={getImageUrl(att.filepath)} alt={att.filename} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
+                  <ZoomIn className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Description */}
       <div>
@@ -252,6 +283,25 @@ export default function IncidentDetailView({ incident, onConfirmResolution }: In
           />
         </div>
       </div>
+
+      {/* Lightbox */}
+      {lightboxImg && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setLightboxImg(null)}
+        >
+          <button onClick={() => setLightboxImg(null)} className="absolute top-5 right-5 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white">
+            <X className="w-5 h-5" />
+          </button>
+          <img
+            src={getImageUrl(lightboxImg.filepath)}
+            alt={lightboxImg.filename}
+            className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <p className="mt-3 text-white/50 text-xs font-mono">{lightboxImg.filename}</p>
+        </div>
+      )}
     </div>
   )
 }

@@ -29,7 +29,7 @@ export default function LocationPicker({ initialLocation, onChange }: LocationPi
 
             map.current = L.map(mapContainer.current!).setView([defaultLoc.lat, defaultLoc.lng], 15)
 
-            L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
                 attribution: "&copy; OpenStreetMap contributors &copy; CartoDB",
                 maxZoom: 19,
             }).addTo(map.current)

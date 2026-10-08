@@ -102,6 +102,10 @@ export const incidentsAPI = {
   getAllAttachments: async (limit = 100) => {
     return fetchAPI(`/attachments?limit=${limit}`);
   },
+
+  getAttachments: async (id: number) => {
+    return fetchAPI(`/incidents/${id}/attachments`);
+  },
 };
 
 // Personnel API

@@ -51,7 +51,44 @@ def get_personnel():
         'count': len(personnel)
     })
 
+@personnel_bp.route('/personnel/user/<int:user_id>', methods=['GET'])
+def get_personnel_by_user_id(user_id):
+    """Get personnel record by auth user ID"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT * FROM personnel WHERE user_id = ?', (user_id,))
+    person = cursor.fetchone()
+
+    if not person:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Personnel record not found for this user'}), 404
+
+    person = dict(person)
+
+    # Get assigned incident if any
+    if person.get('assigned_incident_id'):
+        cursor.execute('SELECT * FROM incidents WHERE id = ?', (person['assigned_incident_id'],))
+        incident = cursor.fetchone()
+        if incident:
+            person['assigned_incident'] = dict(incident)
+
+    # Format location
+    if person.get('lat') and person.get('lng'):
+        person['location'] = {
+            'lat': person['lat'],
+            'lng': person['lng']
+        }
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'personnel': person
+    })
+
 @personnel_bp.route('/personnel/<int:personnel_id>', methods=['GET'])
+
 def get_personnel_detail(personnel_id):
     """Get detailed personnel information"""
     conn = get_db_connection()

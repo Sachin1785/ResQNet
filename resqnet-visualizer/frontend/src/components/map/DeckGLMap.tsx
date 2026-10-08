@@ -112,13 +112,10 @@ export default function DeckGLMap({ currentTickTime, ticksHistory }: DeckGLMapPr
               'carto-dark': {
                 type: 'raster',
                 tiles: [
-                  "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-                  "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-                  "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-                  "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+                  "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.png",
                 ],
                 tileSize: 256,
-                attribution: '&copy; CARTO'
+                attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               }
             },
             layers: [

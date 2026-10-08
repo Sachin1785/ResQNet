@@ -62,7 +62,7 @@ export default function MapSection({ activeIncident }: MapSectionProps) {
       map.current = L.map(mapContainer.current!).setView([(startLat + destLat) / 2, (startLng + destLng) / 2], 13)
 
       // Add modern tile layer
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "&copy; OpenStreetMap contributors &copy; CartoDB",
         maxZoom: 19,
       }).addTo(map.current)

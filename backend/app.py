@@ -324,6 +324,48 @@ app.broadcast_event = broadcast_event
 
 # ==================== Initialize Database ====================
 
+def ensure_personnel_records():
+    """Ensure every responder user has a linked personnel record"""
+    from database import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Find all responder users with no personnel record
+    cursor.execute('''
+        SELECT u.id, u.name, u.role FROM users u
+        LEFT JOIN personnel p ON p.user_id = u.id
+        WHERE u.role = 'responder' AND p.id IS NULL
+    ''')
+    missing = cursor.fetchall()
+
+    for user in missing:
+        # Infer role from name (simple heuristic)
+        name_lower = user['name'].lower()
+        if 'fire' in name_lower:
+            role = 'Firefighter'
+        elif 'paramedic' in name_lower or 'emt' in name_lower:
+            role = 'Paramedic'
+        elif 'officer' in name_lower or 'police' in name_lower:
+            role = 'Police Officer'
+        elif 'hazmat' in name_lower:
+            role = 'Hazmat Specialist'
+        else:
+            role = 'First Responder'
+
+        cursor.execute('''
+            INSERT INTO personnel (user_id, name, role, status)
+            VALUES (?, ?, ?, 'available')
+        ''', (user['id'], user['name'], role))
+        print(f"  Created personnel record for: {user['name']} ({role})")
+
+    if missing:
+        conn.commit()
+        print(f"✅ Created {len(missing)} missing personnel record(s)")
+    else:
+        print("✅ All responders have personnel records")
+
+    conn.close()
+
 def initialize_app():
     """Initialize application on startup"""
     print("🚀 Initializing Crisis Management Backend...")
@@ -338,6 +380,9 @@ def initialize_app():
     else:
         print("✅ Database already exists")
 
+    # Ensure every responder user has a personnel record
+    ensure_personnel_records()
+
     # Always ensure the IoT sensor database is initialized (separate file)
     from iot_database import init_iot_db
     init_iot_db()
@@ -345,6 +390,7 @@ def initialize_app():
     print(f"📁 Upload folder: {Config.UPLOAD_FOLDER}")
     print(f"🌐 CORS enabled for: {Config.CORS_ORIGINS}")
     print("✅ Backend initialized successfully!")
+
 
 if __name__ == '__main__':
     initialize_app()

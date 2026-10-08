@@ -36,6 +36,28 @@ def get_all_attachments():
         'attachments': attachments
     })
 
+@incidents_bp.route('/incidents/<int:incident_id>/attachments', methods=['GET'])
+def get_incident_attachments(incident_id):
+    """Get all attachments for a specific incident"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT * FROM attachments
+        WHERE incident_id = ?
+        ORDER BY created_at DESC
+    ''', (incident_id,))
+    
+    attachments = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'count': len(attachments),
+        'attachments': attachments
+    })
+
+
 @incidents_bp.route('/incidents', methods=['GET'])
 def get_incidents():
     """Get all incidents with optional filters"""

@@ -16,9 +16,12 @@ import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import com.example.sosmesh.data.SosRepository
+import com.example.sosmesh.mesh.GossipEngine
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Arrays
 
@@ -33,6 +36,9 @@ class BleAdvertiser(
     private var gattServer: BluetoothGattServer? = null
     private val gson = Gson()
     private val scope = CoroutineScope(Dispatchers.IO)
+    private var advJob: Job? = null
+    private val gossipEngine = GossipEngine()
+    private var currentHash: ByteArray? = null
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
@@ -53,12 +59,13 @@ class BleAdvertiser(
         ) {
             if (Constants.SOS_CHARACTERISTIC_UUID == characteristic.uuid) {
                 scope.launch {
-                    val messages = repository.getPendingMessages()
-                    val json = gson.toJson(messages)
+                    val allMessages = repository.getPendingMessages()
+                    val relayable = gossipEngine.filterRelayableMessages(allMessages)
+                    val json = gson.toJson(relayable)
                     val bytes = json.toByteArray(Charsets.UTF_8)
                     
-                    if (messages.isNotEmpty()) {
-                        Log.d("BleAdvertiser", "📤 Sent ${messages.size} message(s) to nearby device")
+                    if (relayable.isNotEmpty() && offset == 0) {
+                        Log.d("BleAdvertiser", "📤 Sent ${relayable.size} relayable message(s) to nearby device")
                     }
 
                     if (offset >= bytes.size) {
@@ -81,27 +88,52 @@ class BleAdvertiser(
             Log.e("BleAdvertiser", "Bluetooth LE Advertising not supported")
             return
         }
-
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-            .setConnectable(true)
-            .setTimeout(0)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-            .build()
-
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
-            .addServiceUuid(ParcelUuid(Constants.SOS_SERVICE_UUID))
-            .build()
-
-        advertiser?.startAdvertising(settings, data, advertiseCallback)
         setupGattServer()
+        startAdvertisingLoop()
+    }
+
+    private fun startAdvertisingLoop() {
+        advJob?.cancel()
+        advJob = scope.launch {
+            while (true) {
+                val messages = repository.getPendingMessages()
+                val newHash = gossipEngine.getActiveMessageIdToAdvertise(messages)
+                
+                if (!newHash.contentEquals(currentHash)) {
+                    Log.d("BleAdvertiser", "Updating advertisement payload")
+                    advertiser?.stopAdvertising(advertiseCallback)
+                    currentHash = newHash
+                    
+                    val settings = AdvertiseSettings.Builder()
+                        .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                        .setConnectable(true)
+                        .setTimeout(0)
+                        .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                        .build()
+
+                    val dataBuilder = AdvertiseData.Builder()
+                        .setIncludeDeviceName(false)
+                        .addServiceUuid(ParcelUuid(Constants.SOS_SERVICE_UUID))
+                        
+                    newHash?.let {
+                        // Advertise the first 4 bytes of the msgId as Service Data
+                        dataBuilder.addServiceData(ParcelUuid(Constants.SOS_SERVICE_UUID), it)
+                    }
+
+                    val data = dataBuilder.build()
+                    advertiser?.startAdvertising(settings, data, advertiseCallback)
+                }
+                delay(10_000) // check every 10 seconds
+            }
+        }
     }
 
     fun stopAdvertising() {
+        advJob?.cancel()
         advertiser?.stopAdvertising(advertiseCallback)
         gattServer?.close()
         gattServer = null
+        currentHash = null
     }
 
     private fun setupGattServer() {

@@ -22,5 +22,11 @@ data class SosMessage(
     @SerializedName("timestamp")
     val timestamp: Long,
     @SerializedName("delivered")
-    var isDelivered: Boolean = false
+    var isDelivered: Boolean = false,
+    
+    // New fields for Bouncing (Gossip Protocol)
+    @SerializedName("hop")
+    var hop: Int = 0,
+    @SerializedName("ttl")
+    var ttl: Int = 5 // maximum allowed hops
 )

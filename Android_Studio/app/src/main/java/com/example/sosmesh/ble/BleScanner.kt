@@ -34,18 +34,43 @@ class BleScanner(
     private val gson = Gson()
     private val scope = CoroutineScope(Dispatchers.IO)
     
-    // Simple deduplication for current scan session
+    // Deduplication and cooldown to prevent GATT reconnect storms
     private val connectedDevices = mutableSetOf<String>()
+    private val connectionCooldown = mutableMapOf<String, Long>()
+    private val COOLDOWN_MS = 60_000L // 60 seconds backoff
     
     // Public getter for discovered device count
-    fun getDiscoveredDeviceCount(): Int = connectedDevices.size
+    fun getDiscoveredDeviceCount(): Int = connectionCooldown.size
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { device ->
-                if (!connectedDevices.contains(device.address)) {
-                    connectedDevices.add(device.address)
-                    device.connectGatt(context, false, gattCallback)
+                val now = System.currentTimeMillis()
+                val lastContact = connectionCooldown[device.address] ?: 0L
+                
+                // Read advertised hash if present
+                val record = result.scanRecord
+                val serviceData = record?.serviceData?.get(ParcelUuid(Constants.SOS_SERVICE_UUID))
+                
+                scope.launch {
+                    var shouldConnect = true
+                    
+                    if (serviceData != null) {
+                        val existing = repository.getAllMessages()
+                        val alreadyHas = existing.any { msg ->
+                            val hash = msg.msgId.toByteArray(Charsets.UTF_8).take(4).toByteArray()
+                            hash.contentEquals(serviceData)
+                        }
+                        if (alreadyHas) {
+                            shouldConnect = false
+                        }
+                    }
+                    
+                    if (shouldConnect && (now - lastContact > COOLDOWN_MS) && !connectedDevices.contains(device.address)) {
+                        connectedDevices.add(device.address)
+                        connectionCooldown[device.address] = now
+                        device.connectGatt(context, false, gattCallback)
+                    }
                 }
             }
         }
@@ -96,8 +121,11 @@ class BleScanner(
                         var newCount = 0
                         messages.forEach { msg ->
                             if (!repository.hasMessage(msg.msgId)) {
-                                repository.addMessage(msg)
-                                newCount++
+                                val updatedMsg = msg.copy(hop = msg.hop + 1)
+                                if (updatedMsg.hop <= updatedMsg.ttl) {
+                                    repository.addMessage(updatedMsg)
+                                    newCount++
+                                }
                             }
                         }
                         if (newCount > 0) {
@@ -129,8 +157,7 @@ class BleScanner(
 
     fun stopScanning() {
         scanner?.stopScan(scanCallback)
-        // Clear cache so we can reconnect if needed? 
-        // Or keep it to avoid loops. For now, clear it on stop.
         connectedDevices.clear()
+        connectionCooldown.clear()
     }
 }

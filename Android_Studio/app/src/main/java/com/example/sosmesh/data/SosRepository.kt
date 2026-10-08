@@ -8,7 +8,7 @@ class SosRepository(context: Context) {
         context.applicationContext,
         AppDatabase::class.java,
         "sos_mesh.db"
-    ).build()
+    ).fallbackToDestructiveMigration().build()
 
     private val sosDao = database.sosDao()
 

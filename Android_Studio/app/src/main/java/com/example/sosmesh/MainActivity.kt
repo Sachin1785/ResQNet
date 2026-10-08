@@ -1,12 +1,17 @@
 package com.example.sosmesh
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -15,7 +20,6 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.work.Constraints
@@ -23,21 +27,21 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import com.example.sosmesh.ble.MeshManager
 import com.example.sosmesh.data.SosMessage
 import com.example.sosmesh.data.SosRepository
-import com.example.sosmesh.network.ApiClient
 import com.example.sosmesh.network.UploadWorker
+import com.example.sosmesh.service.MeshService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity(), LocationListener {
 
-    private lateinit var meshManager: MeshManager
+    private var meshService: MeshService? = null
+    private var isBound = false
+
     private lateinit var statusText: TextView
     private lateinit var logsText: TextView
     private lateinit var repository: SosRepository
@@ -56,6 +60,18 @@ class MainActivity : AppCompatActivity(), LocationListener {
     
     // Mesh activity tracking
     private var meshCycleCount = 0
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val binder = service as MeshService.LocalBinder
+            meshService = binder.getService()
+            isBound = true
+        }
+
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            isBound = false
+        }
+    }
 
     private val requestPermissionsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -88,7 +104,6 @@ class MainActivity : AppCompatActivity(), LocationListener {
                 Toast.makeText(this, "Please grant all permissions: $message", Toast.LENGTH_LONG).show()
                 statusText.text = "Status: Permissions Missing"
                 
-                // Still try to start what we can
                 if (bluetoothGranted) {
                     startMeshSystem()
                 }
@@ -102,7 +117,6 @@ class MainActivity : AppCompatActivity(), LocationListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialize UI elements
         statusText = findViewById(R.id.tv_status)
         logsText = findViewById(R.id.tv_logs)
         etName = findViewById(R.id.et_name)
@@ -111,31 +125,20 @@ class MainActivity : AppCompatActivity(), LocationListener {
         tvLongitude = findViewById(R.id.tv_longitude)
         tvDeviceCount = findViewById(R.id.tv_device_count)
         val btnSendSos = findViewById<Button>(R.id.btn_send_sos)
-        // val btnTestUpload = findViewById<Button>(R.id.btn_test_upload)
         
         repository = SosRepository.getInstance(this)
-        meshManager = MeshManager(this)
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
-        // Setup incident type spinner
         setupIncidentTypeSpinner()
-        
-        // Enable scrolling in logs TextView
         logsText.movementMethod = android.text.method.ScrollingMovementMethod()
 
         btnSendSos.setOnClickListener {
             sendSosSignal()
         }
-        
-        /*
-        btnTestUpload.setOnClickListener {
-            testServerUpload()
-        }
-        */
 
         checkAndRequestPermissions()
-        setupUploadWorker()
-        startActiveUploader() // Start fast 30s uploader
+        // Keep the old workmanager as a fallback backup
+        setupUploadWorker() 
         startLogPoller()
     }
     
@@ -174,23 +177,29 @@ class MainActivity : AppCompatActivity(), LocationListener {
 
     private fun startMeshSystem() {
         statusText.text = getString(R.string.status_mesh_active)
-        meshManager.start()
-        Toast.makeText(this, "Mesh Started - Broadcasting every 15s", Toast.LENGTH_SHORT).show()
+        
+        val intent = Intent(this, MeshService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        
+        Toast.makeText(this, "Mesh Started in Background", Toast.LENGTH_SHORT).show()
         startMeshActivityMonitor()
     }
     
     private fun startLocationUpdates() {
         try {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                // Request location updates
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    5000L, // 5 seconds
-                    10f,   // 10 meters
+                    5000L,
+                    10f,
                     this
                 )
                 
-                // Try to get last known location immediately
                 val lastLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
                     ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 
@@ -218,9 +227,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
     }
     
     @Deprecated("Deprecated in Java")
-    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
-        // Legacy method - no action needed
-    }
+    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     
     override fun onProviderEnabled(provider: String) {
         Toast.makeText(this, "GPS Enabled", Toast.LENGTH_SHORT).show()
@@ -257,7 +264,6 @@ class MainActivity : AppCompatActivity(), LocationListener {
     }
     
     private fun setupUploadWorker() {
-        // ... (Keep existing code)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -273,44 +279,13 @@ class MainActivity : AppCompatActivity(), LocationListener {
         )
     }
 
-    private fun startActiveUploader() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            while (true) {
-                try {
-                    val pendingMessages = repository.getPendingMessages()
-                    if (pendingMessages.isNotEmpty()) {
-                        Log.d("ActiveUploader", "Found ${pendingMessages.size} pending messages. Attempting upload...")
-                        
-                        pendingMessages.forEach { msg ->
-                            try {
-                                val response = ApiClient.instance.sendSos(msg)
-                                if (response.isSuccessful) {
-                                    Log.d("ActiveUploader", "✅ Uploaded: ${msg.msgId}")
-                                    repository.markDelivered(msg.msgId)
-                                } else {
-                                    Log.e("ActiveUploader", "❌ Failed ${msg.msgId}: ${response.code()}")
-                                }
-                            } catch (e: Exception) {
-                                Log.e("ActiveUploader", "❌ Error uploading ${msg.msgId}", e)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("ActiveUploader", "Loop error", e)
-                }
-                delay(30_000) // Check every 30 seconds
-            }
-        }
-    }
-
     private fun startMeshActivityMonitor() {
         lifecycleScope.launch {
             while (true) {
-                delay(1000) // Update every second
+                delay(1000)
                 meshCycleCount++
                 
-                // Update device counter
-                val deviceCount = meshManager.getDiscoveredDeviceCount()
+                val deviceCount = if (isBound) meshService?.getDeviceCount() ?: 0 else 0
                 tvDeviceCount.text = "📡 $deviceCount"
             }
         }
@@ -340,59 +315,13 @@ class MainActivity : AppCompatActivity(), LocationListener {
             }
         }
     }
-    
-    private fun testServerUpload() {
-        lifecycleScope.launch {
-            try {
-                Toast.makeText(this@MainActivity, "🔧 Sending test packet...", Toast.LENGTH_SHORT).show()
-                
-                // Create a test message
-                val testMessage = SosMessage(
-                    msgId = "TEST-${System.currentTimeMillis()}",
-                    type = "SOS",
-                    name = "Test User",
-                    latitude = currentLatitude,
-                    longitude = currentLongitude,
-                    emergency = "Server Connection Test",
-                    timestamp = System.currentTimeMillis(),
-                    isDelivered = false
-                )
-                
-                // Send directly to server
-                val response = withContext(Dispatchers.IO) {
-                    ApiClient.instance.sendSos(testMessage)
-                }
-                
-                if (response.isSuccessful) {
-                    Toast.makeText(
-                        this@MainActivity, 
-                        "✅ Server responded! Code: ${response.code()}", 
-                        Toast.LENGTH_LONG
-                    ).show()
-                    Log.d("TestUpload", "✅ Success! Response code: ${response.code()}")
-                } else {
-                    Toast.makeText(
-                        this@MainActivity, 
-                        "❌ Server error: ${response.code()}", 
-                        Toast.LENGTH_LONG
-                    ).show()
-                    Log.e("TestUpload", "❌ Failed with code: ${response.code()}")
-                }
-                
-            } catch (e: Exception) {
-                Toast.makeText(
-                    this@MainActivity, 
-                    "❌ Network error: ${e.message}", 
-                    Toast.LENGTH_LONG
-                ).show()
-                Log.e("TestUpload", "❌ Exception: ${e.message}", e)
-            }
-        }
-    }
 
     override fun onDestroy() {
         super.onDestroy()
-        meshManager.stop()
+        if (isBound) {
+            unbindService(connection)
+            isBound = false
+        }
         locationManager.removeUpdates(this)
     }
 }

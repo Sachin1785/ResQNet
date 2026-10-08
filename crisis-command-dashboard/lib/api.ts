@@ -55,10 +55,10 @@ export const incidentsAPI = {
     });
   },
 
-  resolve: async (id: number, confirm: boolean = false, reject: boolean = false) => {
+  resolve: async (id: number, confirm: boolean = true, action: 'resolve' | 'cancel' = 'resolve', reason?: string) => {
     return fetchAPI(`/incidents/${id}/resolve`, {
       method: 'POST',
-      body: JSON.stringify({ confirm, reject }),
+      body: JSON.stringify({ confirm, action, reason }),
     });
   },
 

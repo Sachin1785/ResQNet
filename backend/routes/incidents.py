@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import get_db_connection
 from datetime import datetime, timedelta
 from utils.file_utils import save_file
@@ -624,7 +624,7 @@ def add_timeline_event(incident_id):
 
 @incidents_bp.route('/incidents/<int:incident_id>/resolve', methods=['POST'])
 def resolve_incident(incident_id):
-    """Resolve incident and release all assigned resources"""
+    """Resolve or cancel incident and release all assigned resources with broadcasts"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -635,13 +635,16 @@ def resolve_incident(incident_id):
         conn.close()
         return jsonify({'success': False, 'error': 'Incident not found'}), 404
         
+    incident_dict = dict(incident)
+    
     try:
-        # Check for confirmation flag
         data = request.get_json() or {}
         confirm = data.get('confirm', False)
-
-        # If not confirmed, just set to pending_review
-        if not confirm:
+        action = data.get('action', 'resolve')  # 'resolve' or 'cancel'
+        reason = data.get('reason', '')
+        
+        # If not confirmed and not explicit cancel, set to pending_review
+        if not confirm and action != 'cancel':
             now = datetime.now().isoformat()
             cursor.execute('''
                 UPDATE incidents 
@@ -662,6 +665,13 @@ def resolve_incident(incident_id):
             
             conn.commit()
             
+            if hasattr(current_app, 'broadcast_event'):
+                current_app.broadcast_event('incident_updated', {
+                    'incident_id': incident_id,
+                    'status': 'pending_review',
+                    'title': incident_dict['title']
+                })
+            
             return jsonify({
                 'success': True,
                 'message': 'Incident submitted for review',
@@ -670,49 +680,107 @@ def resolve_incident(incident_id):
                 'released_resources': 0
             })
 
-        # 2. Update Incident Status
+        # 2. Determine target status
+        target_status = 'cancelled' if action == 'cancel' else 'resolved'
         now = datetime.now().isoformat()
         cursor.execute('''
             UPDATE incidents 
-            SET status = 'resolved', updated_at = ?, resolved_at = ?
+            SET status = ?, updated_at = ?, resolved_at = ?
             WHERE id = ?
-        ''', (now, now, incident_id))
+        ''', (target_status, now, now, incident_id))
         
-        # 3. Release Personnel
+        # 3. Fetch assigned personnel before releasing so we can notify them
+        cursor.execute('SELECT id, user_id, name FROM personnel WHERE assigned_incident_id = ?', (incident_id,))
+        assigned_personnel = [dict(row) for row in cursor.fetchall()]
+        
+        # 4. Release Personnel
         cursor.execute('''
             UPDATE personnel
             SET status = 'available', assigned_incident_id = NULL, updated_at = ?
             WHERE assigned_incident_id = ?
-        ''', (datetime.now().isoformat(), incident_id))
+        ''', (now, incident_id))
         affected_personnel = cursor.rowcount
         
-        # 4. Release Resources
+        # 5. Release Resources
         cursor.execute('''
             UPDATE resources
             SET status = 'available', assigned_incident_id = NULL, updated_at = ?
             WHERE assigned_incident_id = ?
-        ''', (datetime.now().isoformat(), incident_id))
+        ''', (now, incident_id))
         affected_resources = cursor.rowcount
         
-        # 5. Add Timeline Event
+        # 6. Add Timeline Event
+        action_title = 'Resolved' if target_status == 'resolved' else 'Cancelled'
+        timeline_desc = f'Incident {action_title.lower()} by Command Dispatch. Released {affected_personnel} personnel and {affected_resources} resources.'
+        if reason:
+            timeline_desc += f' Reason: {reason}'
+            
         cursor.execute('''
             INSERT INTO incident_timeline (incident_id, event_type, description, user_name)
             VALUES (?, ?, ?, ?)
         ''', (
             incident_id, 
-            'incident_resolved', 
-            f'Incident resolution confirmed. Released {affected_personnel} personnel and {affected_resources} resources.', 
-            'Supervisor'
+            f'incident_{target_status}', 
+            timeline_desc, 
+            'Command Dispatcher'
         ))
+        
+        # 7. Add System Communication Notice
+        sys_msg = f"Incident #{incident_id} ({incident_dict['title']}) has been marked as {action_title.upper()} by Command Dispatch."
+        if reason:
+            sys_msg += f" Note: {reason}"
+        cursor.execute('''
+            INSERT INTO communications (incident_id, sender_id, sender_name, message, type)
+            VALUES (?, NULL, 'Command Dispatch', ?, 'system')
+        ''', (incident_id, sys_msg))
         
         conn.commit()
         
-        # Broadcast update (optional but good practice)
-        # We generally rely on the polling/websocket to pick up status changes
+        # 8. Broadcast Real-time WebSocket Notifications
+        if hasattr(current_app, 'broadcast_event'):
+            # Broadcast incident update (to update all map & dashboard cards)
+            current_app.broadcast_event('incident_updated', {
+                'incident_id': incident_id,
+                'status': target_status,
+                'title': incident_dict['title'],
+                'action': target_status
+            })
+            
+            # Broadcast specific resolution/cancellation event
+            current_app.broadcast_event('incident_resolved', {
+                'incident_id': incident_id,
+                'status': target_status,
+                'title': incident_dict['title'],
+                'action': target_status,
+                'message': sys_msg,
+                'reporter_id': incident_dict.get('reported_by'),
+                'released_personnel': affected_personnel,
+                'released_resources': affected_resources
+            })
+            
+            # Notify each responder that they have been released and returned to available
+            for p in assigned_personnel:
+                current_app.broadcast_event('personnel_status_updated', {
+                    'personnel_id': p['id'],
+                    'user_id': p.get('user_id'),
+                    'status': 'available',
+                    'assigned_incident_id': None,
+                    'incident_id': incident_id,
+                    'message': f"Incident #{incident_id} was {target_status}. You are now back on standby/available."
+                })
+                
+            # Broadcast comms message
+            current_app.broadcast_event('communication_received', {
+                'incident_id': incident_id,
+                'sender_name': 'Command Dispatch',
+                'message': sys_msg,
+                'type': 'system'
+            })
         
         return jsonify({
             'success': True,
-            'message': 'Incident resolved successfully',
+            'message': f'Incident {target_status} successfully',
+            'status': target_status,
             'released_personnel': affected_personnel,
             'released_resources': affected_resources
         })

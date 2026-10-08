@@ -322,12 +322,14 @@ export default function CrisisCommandDashboard() {
     }
 
     on('incident_updated', handleIncidentUpdate)
+    on('incident_resolved', handleIncidentUpdate)
     on('personnel_location_updated', handlePersonnelLocationUpdate)
     on('personnel_status_updated', handlePersonnelStatusUpdate)
     on('personnel_assigned', handlePersonnelAssigned)
 
     return () => {
       off('incident_updated', handleIncidentUpdate)
+      off('incident_resolved', handleIncidentUpdate)
       off('personnel_location_updated', handlePersonnelLocationUpdate)
       off('personnel_status_updated', handlePersonnelStatusUpdate)
       off('personnel_assigned', handlePersonnelAssigned)
@@ -355,15 +357,23 @@ export default function CrisisCommandDashboard() {
     setSelectedIncident(null) // Deselect incident if personnel is selected
   }
 
-  const handleConfirmResolution = async (incidentId: number) => {
+  const handleConfirmResolution = async (incidentId: number, action: 'resolve' | 'cancel' = 'resolve') => {
+    const isCancel = action === 'cancel'
+    const promptMsg = isCancel
+      ? `Are you sure you want to CANCEL incident #${incidentId}?\n\nAll assigned personnel and equipment will be stood down, and reporter/responder channels will be notified.`
+      : `Are you sure you want to mark incident #${incidentId} as RESOLVED?\n\nAll assigned personnel and equipment will be released back to Available status.`
+
+    if (!confirm(promptMsg)) return
+
     try {
-      if (confirm("Are you sure you want to confirm resolution and release all resources?")) {
-        await incidentsAPI.resolve(incidentId, true)
-        // WebSocket will handle the update refresh
+      await incidentsAPI.resolve(incidentId, true, action)
+      if (selectedIncident?.id === incidentId) {
+        setSelectedIncident(null)
       }
+      fetchData(true)
     } catch (error) {
-      console.error("Failed to confirm resolution:", error)
-      alert("Failed to confirm resolution")
+      console.error(`Failed to ${action} incident:`, error)
+      alert(`Failed to ${action} incident: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 

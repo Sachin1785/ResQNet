@@ -4,6 +4,7 @@ import { Flame, Heart, Shield, AlertTriangle, MapPin, Clock, CheckCircle, Loader
 import { useState, useEffect } from "react"
 import { incidentsAPI } from "@/lib/api"
 import { useWebSocket } from "@/hooks/use-websocket"
+import { useToast } from "@/hooks/use-toast"
 import { calculateDistance } from "@/lib/utils"
 
 interface UserHomeProps {
@@ -16,8 +17,9 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
     const [nearbyIncidents, setNearbyIncidents] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+    const { toast } = useToast()
 
-    const { on, isConnected } = useWebSocket({
+    const { on, off, isConnected } = useWebSocket({
         autoConnect: true,
         onConnect: () => console.log('UserHome connected to WebSocket'),
     })
@@ -87,10 +89,27 @@ export default function UserHome({ onNavigateToReport, onNavigateToSafety, activ
     useEffect(() => {
         if (!isConnected) return
         const refresh = () => fetchNearbyIncidents()
+
+        const handleIncidentResolved = (data: any) => {
+            const isCancelled = data.status === 'cancelled'
+            toast({
+                title: isCancelled ? "Request Cancelled" : "Incident Resolved",
+                description: data.message || `Incident "${data.title}" was ${data.status || 'resolved'} by Command Dispatch.`,
+                variant: isCancelled ? "destructive" : "default"
+            })
+            fetchNearbyIncidents()
+        }
+
         on('incident_updated', refresh)
         on('incident_created', refresh)
-        return () => { }
-    }, [isConnected, on])
+        on('incident_resolved', handleIncidentResolved)
+
+        return () => {
+            off('incident_updated', refresh)
+            off('incident_created', refresh)
+            off('incident_resolved', handleIncidentResolved)
+        }
+    }, [isConnected, on, off, toast])
 
     const handleEmergencyClick = (type: string) => {
         if (onNavigateToReport) {

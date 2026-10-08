@@ -8,6 +8,7 @@ import StatusBar from "@/components/status-bar"
 import ActionButtons from "@/components/action-buttons"
 import { incidentsAPI, personnelAPI } from "@/lib/api"
 import { useWebSocket } from "@/hooks/use-websocket"
+import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 
 export default function MissionView() {
@@ -23,8 +24,9 @@ export default function MissionView() {
     const [missionExpanded, setMissionExpanded] = useState(false)
     const [currentUser, setCurrentUser] = useState<any>(null)
     const [personnelId, setPersonnelId] = useState<number | null>(null)
+    const { toast } = useToast()
 
-    const { on, isConnected } = useWebSocket({
+    const { on, off, isConnected } = useWebSocket({
         autoConnect: true,
         onConnect: () => console.log('MissionView connected to WebSocket'),
     })
@@ -87,11 +89,41 @@ export default function MissionView() {
     useEffect(() => {
         if (!isConnected) return
         const refresh = () => fetchActiveMission()
+
+        const handleIncidentResolved = (data: any) => {
+            const isCancelled = data.status === 'cancelled'
+            toast({
+                title: isCancelled ? "Mission Cancelled by Dispatch" : "Incident Resolved",
+                description: data.message || `Incident #${data.incident_id || ''} has been closed by Dispatch. You have returned to available status.`,
+                variant: isCancelled ? "destructive" : "default",
+            })
+            fetchActiveMission()
+        }
+
+        const handlePersonnelStatusUpdate = (data: any) => {
+            if (data.status === 'available' && (data.user_id === currentUser?.id || data.personnel_id === personnelId)) {
+                toast({
+                    title: "Returned to Standby",
+                    description: data.message || "You are now available for new dispatch missions.",
+                })
+            }
+            fetchActiveMission()
+        }
+
         on('incident_updated', refresh)
         on('incident_created', refresh)
         on('personnel_assigned', refresh)
-        return () => { }
-    }, [isConnected, on])
+        on('incident_resolved', handleIncidentResolved)
+        on('personnel_status_updated', handlePersonnelStatusUpdate)
+
+        return () => {
+            off('incident_updated', refresh)
+            off('incident_created', refresh)
+            off('personnel_assigned', refresh)
+            off('incident_resolved', handleIncidentResolved)
+            off('personnel_status_updated', handlePersonnelStatusUpdate)
+        }
+    }, [isConnected, on, off, currentUser, personnelId, toast])
 
     const handleChecklistToggle = (item: string) => {
         if (item in checklist) {

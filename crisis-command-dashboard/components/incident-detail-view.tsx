@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Users, Truck, Radio, MessageSquare, Wifi, Smartphone, CheckCircle, AlertCircle, Image as ImageIcon, X, ZoomIn, Loader2 } from "lucide-react"
+import { Users, Truck, Radio, MessageSquare, Wifi, Smartphone, CheckCircle, CheckCircle2, Ban, AlertCircle, Image as ImageIcon, X, ZoomIn, Loader2 } from "lucide-react"
 import { incidentsAPI } from "@/lib/api"
 
 const SERVER_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace(/\/api$/, '')
@@ -30,7 +30,7 @@ interface IncidentDetailViewProps {
     verification_score?: number
     ai_analysis?: string
   }
-  onConfirmResolution?: (id: number) => void
+  onConfirmResolution?: (id: number, action?: 'resolve' | 'cancel') => void
 }
 
 export default function IncidentDetailView({ incident, onConfirmResolution }: IncidentDetailViewProps) {
@@ -125,18 +125,43 @@ export default function IncidentDetailView({ incident, onConfirmResolution }: In
         )}
       </div>
 
-      {/* Confirmation/Resolution Actions */}
-      {incident.status === 'pending_review' && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 p-2 rounded text-center mb-3">
-          <p className="text-[10px] text-yellow-600 dark:text-yellow-400 mb-1 font-medium italic">
-            Responder has submitted for review
-          </p>
-          <button
-            onClick={() => onConfirmResolution && onConfirmResolution(incident.id)}
-            className="w-full bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold py-1.5 px-3 rounded transition-colors"
-          >
-            Confirm Resolution
-          </button>
+      {/* Dispatcher Actions: Resolve or Cancel */}
+      {incident.status !== 'resolved' && incident.status !== 'cancelled' && (
+        <div className="bg-muted/40 border border-border/70 rounded-lg p-2.5 space-y-2 mb-2">
+          {incident.status === 'pending_review' ? (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 p-2 rounded text-center mb-1.5">
+              <p className="text-[10px] text-yellow-600 dark:text-yellow-400 font-medium italic">
+                Responder has submitted for review
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Dispatch Controls
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono">Status: {incident.status}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => onConfirmResolution && onConfirmResolution(incident.id, 'resolve')}
+              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold py-1.5 px-2 rounded-md transition-all shadow-sm"
+              title="Resolve incident and release assigned units"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Resolve
+            </button>
+            <button
+              onClick={() => onConfirmResolution && onConfirmResolution(incident.id, 'cancel')}
+              className="flex items-center justify-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-semibold py-1.5 px-2 rounded-md transition-all"
+              title="Cancel incident and stand down all units"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              Cancel Incident
+            </button>
+          </div>
         </div>
       )}
 

@@ -13,7 +13,7 @@ export default function IncidentsView() {
     const [isAssigning, setIsAssigning] = useState(false)
     const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
 
-    const { on, isConnected } = useWebSocket({
+    const { on, off, isConnected } = useWebSocket({
         autoConnect: true,
         onConnect: () => console.log('IncidentsView connected to WebSocket'),
     })
@@ -74,9 +74,14 @@ export default function IncidentsView() {
         const refresh = () => fetchIncidents()
         on('incident_updated', refresh)
         on('incident_created', refresh)
+        on('incident_resolved', refresh)
 
-        return () => { }
-    }, [isConnected, on])
+        return () => {
+            off('incident_updated', refresh)
+            off('incident_created', refresh)
+            off('incident_resolved', refresh)
+        }
+    }, [isConnected, on, off])
 
     const filteredIncidents = incidents.filter(inc =>
         inc.type.toLowerCase().includes(searchQuery.toLowerCase()) ||

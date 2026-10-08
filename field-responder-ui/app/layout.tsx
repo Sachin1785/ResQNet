@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ModeProvider } from "@/contexts/mode-context"
 import { PWARegister } from "@/components/pwa-register"
+import { Toaster } from "@/components/ui/toaster"
 
 import type { Viewport } from "next"
 
@@ -60,6 +61,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <ModeProvider>
             {children}
+            <Toaster />
           </ModeProvider>
         </ThemeProvider>
       </body>

@@ -1,6 +1,6 @@
 "use client"
 
-import { X, AlertTriangle, Users, Truck, Clock, FileText, Radio, MessageSquare, Smartphone, Wifi, CheckCircle } from "lucide-react"
+import { X, AlertTriangle, Users, Truck, Clock, FileText, Radio, MessageSquare, Smartphone, Wifi, CheckCircle, CheckCircle2, Ban } from "lucide-react"
 
 interface IncidentDetailModalProps {
   incident: {
@@ -18,10 +18,10 @@ interface IncidentDetailModalProps {
   }
   isOpen: boolean
   onClose: () => void
-  onConfirmResolution?: (id: number) => void
+  onConfirmResolution?: (id: number, action?: 'resolve' | 'cancel') => void
 }
 
-export default function IncidentDetailModal({ incident, isOpen, onClose }: IncidentDetailModalProps) {
+export default function IncidentDetailModal({ incident, isOpen, onClose, onConfirmResolution }: IncidentDetailModalProps) {
   if (!isOpen) return null
 
   const getSeverityColor = (severity: string) => {
@@ -160,20 +160,48 @@ export default function IncidentDetailModal({ incident, isOpen, onClose }: Incid
 
         {/* Footer */}
         <div className="p-4 border-t border-border flex-shrink-0 bg-muted/20 space-y-3">
-          {incident.status === 'pending_review' && (
-             <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-lg">
-                <p className="text-xs text-yellow-600 dark:text-yellow-400 mb-2 font-medium">
-                   <AlertTriangle className="w-3 h-3 inline mr-1" />
-                   Review Required: Responder submitted for resolution.
-                </p>
-                <button 
-                  onClick={() => onConfirmResolution && onConfirmResolution(incident.id)}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
+          {incident.status !== 'resolved' && incident.status !== 'cancelled' && (
+            <div className="bg-muted/40 border border-border/70 rounded-lg p-2.5 space-y-2">
+              {incident.status === 'pending_review' ? (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 p-2 rounded text-center">
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 font-medium italic">
+                    <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
+                    Review Required: Responder submitted for resolution.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-xs text-muted-foreground font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Dispatch Controls
+                  </span>
+                  <span>ID #{incident.id}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    if (onConfirmResolution) onConfirmResolution(incident.id, 'resolve')
+                    onClose()
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold py-2 px-3 rounded-md transition-all flex items-center justify-center gap-1.5 shadow-sm"
                 >
-                  <CheckCircle className="w-3 h-3" />
-                  Confirm Resolution & Release Resources
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Resolve Incident
                 </button>
-             </div>
+                <button
+                  onClick={() => {
+                    if (onConfirmResolution) onConfirmResolution(incident.id, 'cancel')
+                    onClose()
+                  }}
+                  className="w-full bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold py-2 px-3 rounded-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Cancel Incident
+                </button>
+              </div>
+            </div>
           )}
 
           <div className="text-xs text-muted-foreground mb-2">
